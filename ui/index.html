@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta http-equiv="Content-Security-Policy" content="default-src * data: blob: 'unsafe-inline' 'unsafe-eval'; script-src * data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src * data: blob: ws: wss: http: https:;">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Corax Crypto - Quantum Command Center</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <!-- Include Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Include Lightweight Charts -->
+    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+    <div id="scanlines"></div>
+    <div id="vignette"></div>
+    <div id="alert-overlay"></div>
+    <div id="toast-container"></div>
+
+    <div id="webgl-container"></div>
+
+    <div id="connection-status">INITIALIZING QUANTUM LINK...</div>
+
+    <div id="hud" style="display: none;">
+        <div class="panel">
+            <div style="display: flex; justify-content: space-between; align-items: baseline; border-bottom: 1px solid var(--border); margin-bottom: 15px; padding-bottom: 8px;">
+                <h1 style="border: none; margin: 0; padding: 0;">Corax Telemetry</h1>
+                <span id="val-last-updated" style="font-size: 0.75rem; color: rgba(0, 255, 204, 0.6);">SYNCING...</span>
+            </div>
+            <div class="metric">
+                <span>System Mode:</span>
+                <span id="val-mode" class="mode-indicator mode-DRY_RUN">DRY RUN</span>
+            </div>
+            <div class="metric"><span>Ledger Balance:</span> <span id="val-balance" class="value">$---</span></div>
+            <div class="metric"><span>API Latency:</span> <span id="val-latency" class="value">-- ms</span></div>
+            <div class="metric" style="margin-top: 15px;"><span>Regime:</span> <span id="val-regime" class="value">SCANNING</span></div>
+
+            <div class="synthesis-box" id="val-synthesis">
+                [COPILOT] Syncing neuro-link...
+            </div>
+        </div>
+
+
+        <!-- L2 Depth Overlay -->
+        <div class="panel" id="depth-panel" style="margin-top: 15px;">
+            <h1>L2 Depth (BTC)</h1>
+            <div id="depth-asks" style="display: flex; flex-direction: column; gap: 2px; margin-bottom: 5px;">
+            </div>
+            <div style="height: 1px; background: rgba(255,255,255,0.2); margin: 5px 0;"></div>
+            <div id="depth-bids" style="display: flex; flex-direction: column; gap: 2px;">
+            </div>
+        </div>
+
+        <!-- Manual Trading Overlay -->
+        <div class="panel" id="trading-panel" style="margin-top: 15px;">
+            <h1>Manual Override</h1>
+            <div class="trade-controls" style="display: flex; flex-direction: column; gap: 10px;">
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <input type="text" id="trade-symbol" value="BTC/USDT" style="width: 120px; text-transform: uppercase;" placeholder="Symbol">
+                    <input type="number" id="trade-size" value="0.01" step="0.01" min="0.001" style="width: 80px;" placeholder="Size">
+                </div>
+                <div style="display: flex; gap: 10px; margin-top: 5px;">
+                    <button id="btn-buy" style="flex: 1; background: rgba(0, 255, 204, 0.2); color: #00ffcc; border: 1px solid #00ffcc; padding: 10px; cursor: pointer;">BUY</button>
+                    <button id="btn-sell" style="flex: 1; background: rgba(255, 0, 85, 0.2); color: #ff0055; border: 1px solid #ff0055; padding: 10px; cursor: pointer;">SELL</button>
+                </div>
+                <button id="btn-cancel" style="background: rgba(255, 170, 0, 0.2); color: #ffaa00; border: 1px solid #ffaa00; padding: 10px; cursor: pointer; width: 100%;">CANCEL ALL</button>
+            </div>
+        </div>
+
+        <!-- Admin & Settings Overlay -->
+        <div class="panel" id="admin-panel" style="margin-top: 15px;">
+            <h1>Engine Control</h1>
+            <div class="trade-controls" style="margin-bottom: 15px;">
+                <button id="btn-pause" style="background: rgba(255, 170, 0, 0.2); color: #ffaa00; border: 1px solid #ffaa00; padding: 5px 10px; cursor: pointer;">PAUSE</button>
+                <button id="btn-resume" style="background: rgba(0, 255, 204, 0.2); color: #00ffcc; border: 1px solid #00ffcc; padding: 5px 10px; cursor: pointer;">RESUME</button>
+                <button id="btn-kill" style="background: rgba(255, 0, 85, 0.2); color: #ff0055; border: 1px solid #ff0055; padding: 5px 10px; cursor: pointer; font-weight: bold;">KILL SWITCH</button>
+            </div>
+
+            <div style="margin-bottom: 15px; border-top: 1px dashed var(--border); padding-top: 10px;">
+                <label>Set Balance:</label>
+                <input type="number" id="input-balance" value="10000" style="width: 80px;">
+                <button id="btn-set-balance" style="background: rgba(0, 255, 204, 0.2); color: #00ffcc; border: 1px solid #00ffcc; padding: 5px; cursor: pointer;">Set</button>
+            </div>
+
+            <div style="margin-bottom: 15px; border-top: 1px dashed var(--border); padding-top: 10px;">
+                <label>Strategy:</label>
+                <select id="select-strategy" >
+                    <option value="SmaCrossover">SMA Crossover</option>
+                    <option value="FundingRateArb">Funding Rate Arb</option>
+                    <option value="OrderbookImbalance">Orderbook Imbalance</option>
+                </select>
+                <button id="btn-set-strategy" style="background: rgba(0, 255, 204, 0.2); color: #00ffcc; border: 1px solid #00ffcc; padding: 5px; cursor: pointer;">Load</button>
+            </div>
+
+            <div style="border-top: 1px dashed var(--border); padding-top: 10px;">
+                <label>Max Risk/Trade %:</label>
+                <input type="number" id="input-risk" value="0.01" step="0.005" style="width: 60px;">
+                <label>Max DD %:</label>
+                <input type="number" id="input-dd" value="0.05" step="0.01" style="width: 60px;">
+                <button id="btn-update-settings" style="background: rgba(0, 255, 204, 0.2); color: #00ffcc; border: 1px solid #00ffcc; padding: 5px; cursor: pointer;">Save</button>
+            </div>
+        </div>
+
+
+        <!-- Order Book Overlay -->
+        <div class="panel" id="orderbook-panel" style="margin-top: 15px; position: absolute; right: 30px; top: 30px; max-width: 300px;">
+            <h1>L2 Order Book</h1>
+            <div id="ob-asks" style="color: #ff0055; font-size: 0.9em; text-align: right; margin-bottom: 10px; min-height: 100px;">Waiting for data...</div>
+            <div style="border-bottom: 1px dashed var(--border); margin: 5px 0;"></div>
+            <div id="ob-bids" style="color: #00ffcc; font-size: 0.9em; text-align: right; min-height: 100px;"></div>
+        </div>
+
+        <!-- TradingView Chart Overlay -->
+        <div class="panel" style="margin-top: 15px;">
+            <div id="tvchart" style="width: 100%; height: 300px;"></div>
+        </div>
+
+        <div class="panel" id="log-panel" style="margin-top: 15px;">
+            <!-- Logs appear here -->
+        </div>
+
+        <div class="panel" style="position: absolute; bottom: 30px; right: 30px; padding: 10px;">
+            <button id="btn-toggle-view" style="background: rgba(0, 255, 204, 0.2); color: #00ffcc; border: 1px solid #00ffcc; padding: 8px 15px; cursor: pointer;">TOGGLE VIEW: CITY</button>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
