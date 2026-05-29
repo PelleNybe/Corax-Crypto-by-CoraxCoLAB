@@ -49,22 +49,41 @@ class CoraxCopilot:
 
         logger.debug("LLM Prompt generated.")
 
-        if regime == "TRENDING_UP":
-            synthesis = (
-                "Copilot: Bullish momentum confirmed. Order flow supports continuation."
-            )
-        elif regime == "VOLATILE_CRASH":
-            synthesis = "Copilot: Extreme downside volatility. Risk-off mode activated."
-        elif regime == "RANGING":
-            synthesis = (
-                "Copilot: Market consolidating. Avoiding chop until volume expands."
-            )
-        else:
-            synthesis = "Copilot: Analyzing micro-structure for clear direction..."
+        regime_messages = {
+            "TRENDING_UP": "Copilot: Bullish momentum confirmed. Order flow supports continuation.",
+            "VOLATILE_CRASH": "Copilot: Extreme downside volatility. Risk-off mode activated.",
+            "RANGING": "Copilot: Market consolidating. Avoiding chop until volume expands.",
+        }
+
+        synthesis = regime_messages.get(
+            regime, "Copilot: Analyzing micro-structure for clear direction..."
+        )
 
         self._cached_synthesis = synthesis
         self._last_state_hash = state_hash
         return synthesis
+
+    def _resolve_chain(self, chain_match: Optional[re.Match], default: str) -> str:
+        """Helper to resolve chain names from regex matches."""
+        if not chain_match:
+            return default
+
+        src = chain_match.group(1).lower()
+        chain_mapping = {
+            "optimism": "optimism_sepolia",
+            "avalanche": "avalanche_fuji",
+            "arbitrum": "arbitrum_sepolia",
+            "solana": "solana_devnet",
+            "base": "base_sepolia",
+            "polygon": "polygon_amoy",
+            "ethereum": "ethereum_sepolia",
+        }
+
+        for key, value in chain_mapping.items():
+            if key in src:
+                return value
+
+        return default
 
     def _extract_cctp_parameters(self, msg_lower: str) -> Dict[str, Any]:
         """Extracts CCTP transfer parameters from the message."""
@@ -73,43 +92,11 @@ class CoraxCopilot:
         amount = float(amount_match.group(1)) if amount_match else 100.0
 
         source_chain_match = re.search(r"from\s+(\w+)", msg_lower)
-        source_chain = "ethereum_sepolia"
-        if source_chain_match:
-            src = source_chain_match.group(1).lower()
-            if "optimism" in src:
-                source_chain = "optimism_sepolia"
-            elif "avalanche" in src:
-                source_chain = "avalanche_fuji"
-            elif "arbitrum" in src:
-                source_chain = "arbitrum_sepolia"
-            elif "solana" in src:
-                source_chain = "solana_devnet"
-            elif "base" in src:
-                source_chain = "base_sepolia"
-            elif "polygon" in src:
-                source_chain = "polygon_amoy"
-            elif "ethereum" in src:
-                source_chain = "ethereum_sepolia"
+        source_chain = self._resolve_chain(source_chain_match, "ethereum_sepolia")
 
         # We assume a fixed target chain logic for the dummy regex, but in a real LLM we'd parse "to [chain]"
         target_chain_match = re.search(r"to\s+(\w+)", msg_lower)
-        target_chain = "arbitrum_sepolia"
-        if target_chain_match:
-            tgt = target_chain_match.group(1).lower()
-            if "ethereum" in tgt:
-                target_chain = "ethereum_sepolia"
-            elif "optimism" in tgt:
-                target_chain = "optimism_sepolia"
-            elif "avalanche" in tgt:
-                target_chain = "avalanche_fuji"
-            elif "arbitrum" in tgt:
-                target_chain = "arbitrum_sepolia"
-            elif "solana" in tgt:
-                target_chain = "solana_devnet"
-            elif "base" in tgt:
-                target_chain = "base_sepolia"
-            elif "polygon" in tgt:
-                target_chain = "polygon_amoy"
+        target_chain = self._resolve_chain(target_chain_match, "arbitrum_sepolia")
 
         return {
             "amount": amount,
@@ -117,6 +104,21 @@ class CoraxCopilot:
             "target_chain": target_chain,
             "destination_address": "0x1234567890abcdef1234567890abcdef12345678",
         }
+
+    def _match_intent(self, msg_lower: str) -> str:
+        """Helper to match the intent from a lowercased message."""
+        intent_mapping = {
+            "STATUS": ["status", "how are we doing", "summary", "update"],
+            "PAUSE": ["pause", "stop trading", "halt"],
+            "RESUME": ["resume", "start trading", "unpause"],
+            "KILL_SWITCH": ["kill switch", "emergency", "shut it down", "panic"],
+        }
+
+        for intent, keywords in intent_mapping.items():
+            if any(keyword in msg_lower for keyword in keywords):
+                return intent
+
+        return "UNKNOWN"
 
     async def parse_intent(
         self, user_message: str
@@ -144,27 +146,4 @@ class CoraxCopilot:
             logger.debug(f"Extracted tool args: {tool_args}")
             return "CCTP_TRANSFER", tool_args
 
-        if (
-            "status" in msg_lower
-            or "how are we doing" in msg_lower
-            or "summary" in msg_lower
-            or "update" in msg_lower
-        ):
-            return "STATUS", None
-        elif "pause" in msg_lower or "stop trading" in msg_lower or "halt" in msg_lower:
-            return "PAUSE", None
-        elif (
-            "resume" in msg_lower
-            or "start trading" in msg_lower
-            or "unpause" in msg_lower
-        ):
-            return "RESUME", None
-        elif (
-            "kill switch" in msg_lower
-            or "emergency" in msg_lower
-            or "shut it down" in msg_lower
-            or "panic" in msg_lower
-        ):
-            return "KILL_SWITCH", None
-
-        return "UNKNOWN", None
+        return self._match_intent(msg_lower), None

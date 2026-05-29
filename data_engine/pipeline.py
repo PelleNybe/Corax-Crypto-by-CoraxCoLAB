@@ -21,6 +21,7 @@ class MarketDataStream:
         on_signal_callback: Callable[[AISignal, str], Awaitable[None]] = None,
     ):
         from core.strategy_loader import load_strategy
+        from core.state import global_state
 
         self.buffer_size = buffer_size
         self._buffer = []
@@ -38,6 +39,11 @@ class MarketDataStream:
         self.ai_engine = ai_engine
         self.regime_detector = regime_detector
         self.on_signal_callback = on_signal_callback
+        self.global_state = global_state
+
+        # World-Class Feature 3: Liquidity Velocity Circuit Breaker Parameters
+        self.velocity_window = 50
+        self.max_negative_velocity = -50.0  # Threshold for rapid price/liquidity drop
 
         try:
             self.strategy = load_strategy()
@@ -61,9 +67,7 @@ class MarketDataStream:
             return
 
         if self._buffer:
-            keys = self._buffer[0].keys()
-            columnar_data = {k: [d.get(k) for d in self._buffer] for k in keys}
-            df = pl.DataFrame(columnar_data, schema=self._schema)  # noqa: F841
+            df = pl.DataFrame(self._buffer, schema=self._schema)  # noqa: F841
 
         # Append to history and truncate
         self._history.extend(self._buffer)
@@ -73,9 +77,7 @@ class MarketDataStream:
         self._buffer.clear()
 
         # Build lazyframe from full history for continuous context
-        keys_hist = self._history[0].keys()
-        columnar_hist = {k: [d.get(k) for d in self._history] for k in keys_hist}
-        history_df = pl.DataFrame(columnar_hist, schema=self._schema)
+        history_df = pl.DataFrame(self._history, schema=self._schema)
 
         lazy_df = (
             history_df.lazy()
@@ -85,9 +87,53 @@ class MarketDataStream:
 
         asyncio.create_task(self._dispatch_to_strategies(lazy_df))
 
+    async def _check_circuit_breaker(self, df: pl.DataFrame):
+        """
+        World-Class Feature 3: Liquidity Velocity Circuit Breaker
+        Calculates the velocity of price changes over a short window.
+        If velocity is highly negative, triggers a protective halt.
+        """
+        if df.height < self.velocity_window:
+            return False
+
+        # Calculate Price Velocity: (Current Price - Price N periods ago)
+        current_price = df["price"][-1]
+        past_price = df["price"][-self.velocity_window]
+        velocity = current_price - past_price
+
+        # Update global state for UI visualization
+        await self.global_state.update_metric("liquidity_velocity", velocity)
+
+        if velocity < self.max_negative_velocity:
+            logger.critical(
+                f"🛑 CIRCUIT BREAKER TRIGGERED: Extreme negative velocity ({velocity:.2f}) detected!"
+            )
+            # In a full implementation, this would interact directly with RiskManager
+            # For now, we signal a hard halt.
+            return True
+        return False
+
     async def _dispatch_to_strategies(self, lazy_df: pl.LazyFrame):
         try:
             regime = await self.regime_detector.detect_regime(lazy_df)
+
+            # The AI engine provides an overarching synthesis/signal
+            df = await asyncio.to_thread(lazy_df.collect)
+
+            # Check Circuit Breaker
+            is_crashing = await self._check_circuit_breaker(df)
+            if is_crashing:
+                # Force a halt signal if circuit breaker trips
+                signal = AISignal(
+                    asset_pair=df["symbol"][0] if df.height > 0 else "UNKNOWN",
+                    action="HOLD",
+                    confidence_score=1.0,
+                    reasoning="CIRCUIT BREAKER: Extreme negative liquidity velocity.",
+                    metadata={"regime": regime},
+                )
+                if self.on_signal_callback:
+                    asyncio.create_task(self.on_signal_callback(signal, regime))
+                return
 
             # Apply dynamic modular strategy if available
             strategy_signal = "HOLD"
@@ -99,19 +145,15 @@ class MarketDataStream:
 
                 # We need to collect here to check the last signal.
                 # STRICT DIRECTIVE: Use await asyncio.to_thread for .collect()
-                df = await asyncio.to_thread(lazy_df.collect)
+                strat_df = await asyncio.to_thread(lazy_df.collect)
 
-                if df.height > 0:
-                    last_row = df[-1]
-                    if "buy" in df.columns and last_row["buy"][0]:
+                if strat_df.height > 0:
+                    last_row = strat_df[-1]
+                    if "buy" in strat_df.columns and last_row["buy"][0]:
                         strategy_signal = "BUY"
-                    elif "sell" in df.columns and last_row["sell"][0]:
+                    elif "sell" in strat_df.columns and last_row["sell"][0]:
                         strategy_signal = "SELL"
 
-            else:
-                df = await asyncio.to_thread(lazy_df.collect)
-
-            # The AI engine provides an overarching synthesis/signal
             signal = await self.ai_engine.analyze_market_state(df, regime=regime)
 
             # Override AI action if modular strategy has a strong deterministic signal

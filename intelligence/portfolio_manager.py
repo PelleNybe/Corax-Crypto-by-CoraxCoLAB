@@ -35,6 +35,19 @@ class PortfolioManager:
         self.min_trades_for_eval = 5
         self.win_rate_threshold = 0.40
 
+    def _evaluate_signal(self, df: pl.DataFrame) -> str:
+        """Helper to extract action from DataFrame."""
+        if df.height == 0:
+            return "HOLD"
+
+        last_row = df[-1]
+        if "buy" in df.columns and last_row["buy"][0]:
+            return "BUY"
+        if "sell" in df.columns and last_row["sell"][0]:
+            return "SELL"
+
+        return "HOLD"
+
     async def gather_signals(self, lazy_df: pl.LazyFrame) -> Dict[str, Dict[str, Any]]:
         """
         Runs all active (non-degraded) strategies to collect their signals.
@@ -54,16 +67,8 @@ class PortfolioManager:
                 # Strict Directive: async to_thread for collect
                 df = await asyncio.to_thread(strat_df.collect)
 
-                action = "HOLD"
-                if df.height > 0:
-                    last_row = df[-1]
-                    if "buy" in df.columns and last_row["buy"][0]:
-                        action = "BUY"
-                    elif "sell" in df.columns and last_row["sell"][0]:
-                        action = "SELL"
-
                 signals[name] = {
-                    "action": action,
+                    "action": self._evaluate_signal(df),
                     "confidence": 0.8,  # Dummy confidence for now
                 }
             except Exception as e:

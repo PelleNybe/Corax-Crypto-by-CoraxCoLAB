@@ -73,8 +73,17 @@ class Settings(BaseSettings):
     )
 
     # Hardware Backend Configuration
+    DATA_PERSISTENCE_PATH: str = Field(default="./data", description="Data path")
     CORAX_HARDWARE_BACKEND: str = Field(
         default="CPU", description="Inference backend to load (CPU/EDGE_NPU)"
+    )
+    DATA_PERSISTENCE_PATH: str = Field(
+        default="./data", description="Data persistence path"
+    )
+
+    # Data Persistence
+    DATA_PERSISTENCE_PATH: str = Field(
+        default="data/", description="Path for data persistence files"
     )
 
     model_config = SettingsConfigDict(

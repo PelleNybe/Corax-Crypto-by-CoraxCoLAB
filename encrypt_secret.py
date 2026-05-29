@@ -10,36 +10,38 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Hämta Circle API-nyckel för att dynamiskt hämta den publika nyckeln, eller fallback till lokal miljö
-circle_api_key = os.environ.get("CIRCLE_API_KEY")
-public_key_pem = os.environ.get("CIRCLE_PUBLIC_KEY")
 
-if not public_key_pem:
-    if circle_api_key:
-        try:
-            print("🔄 Hämtar Circles publika RSA-nyckel via API...")
-            headers = {
-                "Authorization": f"Bearer {circle_api_key}",
-                "Content-Type": "application/json",
-            }
-            res = requests.get(
-                "https://api.circle.com/v1/w3s/config/entity/publicKey", headers=headers
-            )
-            res.raise_for_status()
-            public_key_pem = res.json()["data"]["publicKey"]
-        except Exception as e:
-            print(f"❌ Fel vid hämtning av publik nyckel via API: {e}")
+def get_public_key_pem():
+    circle_api_key = os.environ.get("CIRCLE_API_KEY")
+    public_key_pem = os.environ.get("CIRCLE_PUBLIC_KEY")
 
     if not public_key_pem:
-        try:
-            with open("circle_public_key.pem", "r") as f:
-                public_key_pem = f.read()
-        except FileNotFoundError:
-            print(
-                "❌ Fel: Kunde inte hämta publik nyckel via API och varken CIRCLE_PUBLIC_KEY eller circle_public_key.pem finns."
-            )
-            exit(1)
+        if circle_api_key:
+            try:
+                print("🔄 Hämtar Circles publika RSA-nyckel via API...")
+                headers = {
+                    "Authorization": f"Bearer {circle_api_key}",
+                    "Content-Type": "application/json",
+                }
+                res = requests.get(
+                    "https://api.circle.com/v1/w3s/config/entity/publicKey",
+                    headers=headers,
+                )
+                res.raise_for_status()
+                public_key_pem = res.json()["data"]["publicKey"]
+            except Exception as e:
+                print(f"❌ Fel vid hämtning av publik nyckel via API: {e}")
 
+        if not public_key_pem:
+            try:
+                with open("circle_public_key.pem", "r") as f:
+                    public_key_pem = f.read()
+            except FileNotFoundError:
+                print(
+                    "❌ Fel: Kunde inte hämta publik nyckel via API och varken CIRCLE_PUBLIC_KEY eller circle_public_key.pem finns."
+                )
+                exit(1)
+    return public_key_pem
 
 
 def encrypt_entity_secret(entity_secret, pem_key):
@@ -56,6 +58,7 @@ def encrypt_entity_secret(entity_secret, pem_key):
 
 
 if __name__ == "__main__":
+    public_key_pem = get_public_key_pem()
     print("\n" + "=" * 50)
     print("🔄 1. Genererar 32-byte Entity Secret...")
     entity_secret = secrets.token_hex(32)

@@ -6,16 +6,23 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from loguru import logger
 import os
+from fastapi.templating import Jinja2Templates
+from fastapi.responses import HTMLResponse
+import secrets
+
 from core.state import global_state
 
-app = FastAPI(title="Corax Crypto API")
+templates = Jinja2Templates(directory="ui")
+app = FastAPI(title="Corax Crypto API", docs_url=None, redoc_url=None, openapi_url=None)
 
 
 @app.middleware("http")
 async def add_csp_header(request: Request, call_next):
+    nonce = secrets.token_hex(16)
+    request.state.nonce = nonce
     response = await call_next(request)
     response.headers["Content-Security-Policy"] = (
-        "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; script-src * 'unsafe-inline' 'unsafe-eval'; connect-src * ws: wss:;"
+        f"default-src 'self'; script-src 'self' 'nonce-{nonce}' 'strict-dynamic'; style-src 'self' 'nonce-{nonce}'; connect-src 'self' ws: wss:; img-src 'self' data: blob:; frame-ancestors 'none';"
     )
     return response
 
@@ -59,11 +66,10 @@ class StrategyRequest(BaseModel):
     strategy: str
 
 
-@app.get("/")
-async def get_index():
+@app.get("/", response_class=HTMLResponse)
+async def get_index(request: Request):
     """Serves the main HUD HTML dashboard."""
-    index_file = os.path.join(ui_dir, "index.html")
-    return FileResponse(index_file)
+    return templates.TemplateResponse("index.html", {"request": request, "nonce": request.state.nonce})
 
 
 @app.post("/api/trade/place")

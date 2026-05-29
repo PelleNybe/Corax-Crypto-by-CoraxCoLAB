@@ -38,6 +38,35 @@ let particleSystem = null;
 let particleCount = 0;
 let pVelocities = [];
 let globalVolume = 0;
+
+// --- Initialize Particles ---
+const pGeo = new THREE.BufferGeometry();
+particleCount = 5000;
+const pPos = new Float32Array(particleCount * 3);
+pVelocities = [];
+
+for (let i = 0; i < particleCount; i++) {
+    pPos[i * 3] = (Math.random() - 0.5) * 40;
+    pPos[i * 3 + 1] = (Math.random() - 0.5) * 20;
+    pPos[i * 3 + 2] = (Math.random() - 0.5) * 40;
+    pVelocities.push({
+        x: (Math.random() - 0.5) * 0.05,
+        y: (Math.random() - 0.5) * 0.05,
+        z: (Math.random() - 0.5) * 0.05
+    });
+}
+pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
+const pMat = new THREE.PointsMaterial({
+    color: 0x00ffcc,
+    size: 0.1,
+    transparent: true,
+    opacity: 0.6,
+    blending: THREE.AdditiveBlending
+});
+particleSystem = new THREE.Points(pGeo, pMat);
+scene.add(particleSystem);
+
+
 // --- Regime Color Mapping ---
 const regimeColors = {
   TRENDING_UP: 0x00ffcc,
@@ -161,6 +190,7 @@ class CandleEngine {
       const xPos = xOffset + i * 1.5;
 
       if (viewMode === "HEATMAP") {
+        // World-Class Feature 5: Quantum Liquidity Heatmap overlay
         // Heatmap view: Flat squares mapped to grid, color intensity based on volume
         const heatmapScale = Math.min((c.volume || 0.1) * 2, 5.0);
         this.dummy.position.set(xPos, 0, (i % 5) * 1.5); // Spread on Z axis
@@ -241,7 +271,7 @@ let candleSeries = null;
 if (tvContainer) {
   try {
     chart = LightweightCharts.createChart(tvContainer, chartOptions);
-    candleSeries = chart.addSeries(LightweightCharts.CandlestickSeries, {
+    candleSeries = chart.addCandleSeries( {
       upColor: "#00ffcc",
       downColor: "#ff0055",
       borderDownColor: "#ff0055",
@@ -286,6 +316,15 @@ function updateHUD(data, type) {
       if (data.regime) {
         targetGridColor.setHex(regimeColors[data.regime] || 0x00ffcc);
       }
+    } else if (type === "metric") {
+        if (data.key === "liquidity_velocity") {
+            const vel = parseFloat(data.value);
+            // Flash screen red if circuit breaker triggered (velocity < -50)
+            if (vel < -50.0) {
+                 triggerTradeAlert("SELL"); // Flash red
+                 addLog(`[CRITICAL] LIQUIDITY VELOCITY CIRCUIT BREAKER TRIPPED! (${vel.toFixed(2)})`, "#ff0055");
+            }
+        }
     }
   } catch (e) {
     console.error("updateHUD error:", e);
@@ -405,6 +444,8 @@ ws.onmessage = (event) => {
     updateHUD(payload.data, "balance");
   } else if (payload.type === "synthesis") {
     updateHUD(payload.data, "synthesis");
+  } else if (payload.type === "metric") {
+    updateHUD(payload.data, "metric");
   } else if (payload.type === "tick") {
     // Feed tick to Candle Engine
     candleEngine.processTick(payload.data);
@@ -574,19 +615,26 @@ const intersectPlane = new THREE.Mesh(planeGeo, planeMat);
 intersectPlane.rotation.x = -Math.PI / 2;
 scene.add(intersectPlane);
 
+// Throttle mousemove
+let isMouseMoving = false;
 window.addEventListener("mousemove", (event) => {
-  // Calculate mouse position in normalized device coordinates
-  mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-  mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+  if (isMouseMoving) return;
+  isMouseMoving = true;
+  requestAnimationFrame(() => {
+    // Calculate mouse position in normalized device coordinates
+    mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
-  // Raycast
-  raycaster.setFromCamera(mouse, camera);
-  const intersects = raycaster.intersectObject(intersectPlane);
+    // Raycast
+    raycaster.setFromCamera(mouse, camera);
+    const intersects = raycaster.intersectObject(intersectPlane);
 
-  if (intersects.length > 0) {
-    crosshair.position.copy(intersects[0].point);
-    crosshair.position.y = 0.05; // slightly above floor
-  }
+    if (intersects.length > 0) {
+      crosshair.position.copy(intersects[0].point);
+      crosshair.position.y = 0.05; // slightly above floor
+    }
+    isMouseMoving = false;
+  });
 });
 
 // --- Animation Loop ---
@@ -635,10 +683,15 @@ function animate() {
   requestAnimationFrame(animate);
 }
 
+// Debounce resize
+let resizeTimeout;
 window.addEventListener("resize", () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
+  clearTimeout(resizeTimeout);
+  resizeTimeout = setTimeout(() => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  }, 100);
 });
 
 animate();

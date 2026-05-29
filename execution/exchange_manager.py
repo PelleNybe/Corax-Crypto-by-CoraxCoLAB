@@ -116,12 +116,24 @@ class ExchangeManager:
     async def _broadcast_orderbook(self, exchange_id: str, symbol: str, orderbook: Any):
         payload = {"exchange_id": exchange_id, "symbol": symbol, "data": orderbook}
         if self.orderbook_subscribers:
-            await asyncio.gather(*(q.put(payload) for q in self.orderbook_subscribers))
+            for q in self.orderbook_subscribers:
+                try:
+                    q.put_nowait(payload)
+                except asyncio.QueueFull:
+                    logger.warning(
+                        f"Orderbook queue full for {exchange_id} {symbol}, dropping update"
+                    )
 
     async def _broadcast_trades(self, exchange_id: str, symbol: str, trades: Any):
         payload = {"exchange_id": exchange_id, "symbol": symbol, "data": trades}
         if self.trade_subscribers:
-            await asyncio.gather(*(q.put(payload) for q in self.trade_subscribers))
+            for q in self.trade_subscribers:
+                try:
+                    q.put_nowait(payload)
+                except asyncio.QueueFull:
+                    logger.warning(
+                        f"Trades queue full for {exchange_id} {symbol}, dropping update"
+                    )
 
     async def _watch_orderbook_loop(self, exchange_id: str, symbol: str):
         """Continuously streams orderbook data for a specific exchange and symbol."""

@@ -23,6 +23,8 @@ class GlobalState:
         self.latest_synthesis = "Initializing LLM Copilot..."
         self.run_mode = "DRY_RUN" if settings.DRY_RUN_MODE else "LIVE"
         self._current_kline = None
+        # World-Class Feature 3 & 5: Custom metrics tracking
+        self.metrics: Dict[str, Any] = {"liquidity_velocity": 0.0}
 
     async def add_connection(self) -> asyncio.Queue:
         queue = asyncio.Queue()
@@ -48,6 +50,12 @@ class GlobalState:
                 tasks.append(queue.put(data))
             if tasks:
                 await asyncio.gather(*tasks)
+
+    async def update_metric(self, key: str, value: Any):
+        """Update generic metrics (like liquidity velocity) for UI broadcasting."""
+        async with self._lock:
+            self.metrics[key] = value
+        await self._broadcast({"type": "metric", "data": {"key": key, "value": value}})
 
     async def update_tick(self, tick: Dict[str, Any]):
         async with self._lock:
@@ -124,6 +132,7 @@ class GlobalState:
             "recent_action": action,
             "mode": self.run_mode,
             "last_price": last_price,
+            **self.metrics,  # Include metrics in summary for LLM
         }
 
 

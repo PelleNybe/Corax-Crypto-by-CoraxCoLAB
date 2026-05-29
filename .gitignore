@@ -13,3 +13,4 @@ venv.bak/
 data/
 .env
 logs/
+circle_env/
