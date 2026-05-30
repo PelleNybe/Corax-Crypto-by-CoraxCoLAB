@@ -69,7 +69,7 @@ class StrategyRequest(BaseModel):
 @app.get("/", response_class=HTMLResponse)
 async def get_index(request: Request):
     """Serves the main HUD HTML dashboard."""
-    return templates.TemplateResponse("index.html", {"request": request, "nonce": request.state.nonce})
+    return templates.TemplateResponse(request, "index.html", {"request": request, "nonce": request.state.nonce})
 
 
 @app.post("/api/trade/place")
