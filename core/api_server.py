@@ -161,11 +161,15 @@ class StrategyRequest(BaseModel):
 @app.get("/", response_class=HTMLResponse)
 async def get_index(request: Request):
     """Serves the main HUD HTML dashboard."""
+<<<<<<< HEAD
     return templates.TemplateResponse(
         request=request,
         name="index.html",
         context={"api_key": settings.API_SECRET_KEY, "nonce": request.state.nonce},
     )
+=======
+    return templates.TemplateResponse(request, "index.html", {"request": request, "nonce": request.state.nonce})
+>>>>>>> cea0fcd95dcf0d4046c31d5712fd62afa1df1276
 
 
 @app.post("/api/trade/place")
