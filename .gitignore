@@ -14,3 +14,4 @@ data/
 .env
 logs/
 circle_env/
+recovery.dat
