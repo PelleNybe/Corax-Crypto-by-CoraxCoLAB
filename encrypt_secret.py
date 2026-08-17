@@ -1,12 +1,9 @@
 import secrets
-import base64
-from cryptography.hazmat.primitives.asymmetric import padding
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.serialization import load_pem_public_key
 
 import os
-import requests
-from dotenv import load_dotenv
+import httpx
+from dotenv import load_dotenv, set_key
+from core.crypto_utils import encrypt_entity_secret
 
 load_dotenv()
 
@@ -23,7 +20,7 @@ def get_public_key_pem():
                     "Authorization": f"Bearer {circle_api_key}",
                     "Content-Type": "application/json",
                 }
-                res = requests.get(
+                res = httpx.get(
                     "https://api.circle.com/v1/w3s/config/entity/publicKey",
                     headers=headers,
                 )
@@ -44,25 +41,13 @@ def get_public_key_pem():
     return public_key_pem
 
 
-def encrypt_entity_secret(entity_secret, pem_key):
-    public_key = load_pem_public_key(pem_key.encode("utf-8"))
-    ciphertext = public_key.encrypt(
-        bytes.fromhex(entity_secret),
-        padding.OAEP(
-            mgf=padding.MGF1(algorithm=hashes.SHA256()),
-            algorithm=hashes.SHA256(),
-            label=None,
-        ),
-    )
-    return base64.b64encode(ciphertext).decode("utf-8")
-
-
-if __name__ == "__main__":
+def main():
     public_key_pem = get_public_key_pem()
     print("\n" + "=" * 50)
     print("🔄 1. Genererar 32-byte Entity Secret...")
     entity_secret = secrets.token_hex(32)
-    print(f"🔑 DIN ENTITY SECRET (SPARA DENNA I .env): \n{entity_secret}\n")
+    print("🔑 DIN ENTITY SECRET har genererats och sparats automatiskt i .env filen.")
+    set_key(".env", "CIRCLE_ENTITY_SECRET", entity_secret)
 
     print("🔄 2. Krypterar lokalt (helt offline)...")
     try:
@@ -73,3 +58,7 @@ if __name__ == "__main__":
         print("=" * 50 + "\n")
     except Exception as e:
         print(f"❌ Fel vid kryptering: {e}")
+
+
+if __name__ == "__main__":  # pragma: no cover
+    main()

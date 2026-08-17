@@ -15,7 +15,7 @@ class BacktestEngine:
         self.regime_detector = RegimeDetector(ai_backend=self.ai_engine.fast_backend)
         self.signals_generated = []
 
-        async def mock_signal_callback(signal: AISignal, regime: str):
+        async def _collect_signal_callback(signal: AISignal, regime: str):
             self.signals_generated.append({"signal": signal, "regime": regime})
             logger.info(
                 f"[BACKTEST] Signal: {signal.action} at {signal.timestamp} (Regime: {regime})"
@@ -25,7 +25,7 @@ class BacktestEngine:
             ai_engine=self.ai_engine,
             regime_detector=self.regime_detector,
             buffer_size=100,
-            on_signal_callback=mock_signal_callback,
+            on_signal_callback=_collect_signal_callback,
         )
 
     async def run(self):

@@ -4,7 +4,7 @@ import time
 from loguru import logger
 from core.config import settings
 from execution.exchange_manager import exchange_manager
-from execution.profit_calculator import ProfitCalculator
+from execution.profit_calculator import ProfitCalculator, ProfitabilityRequest
 
 
 class ArbitrageEngine:
@@ -73,6 +73,8 @@ class ArbitrageEngine:
         """
         Compares highest bid and lowest ask across monitored exchanges.
         Identifies if Bid(Exchange A) > Ask(Exchange B) - Fees.
+
+        Assumes a standard trade size of 0.01 for base assets like BTC/ETH.
         """
         best_bids = {}
         best_asks = {}
@@ -90,7 +92,6 @@ class ArbitrageEngine:
                 bid_a = best_bids[ex_a]
                 ask_b = best_asks[ex_b]
 
-                # Assume a standard trade size of 0.01 for base assets like BTC/ETH
                 trade_amount_base = 0.01
 
                 orderbook_buy = self.orderbooks[ex_b].get(symbol)
@@ -115,7 +116,7 @@ class ArbitrageEngine:
                 if gross_margin_pct < min_net_margin_pct + 0.1:
                     continue
 
-                profit_metrics = ProfitCalculator.calculate_net_profitability(
+                request = ProfitabilityRequest(
                     symbol=symbol,
                     exchange_buy=ex_b,
                     exchange_sell=ex_a,
@@ -125,6 +126,7 @@ class ArbitrageEngine:
                     orderbook_buy=orderbook_buy,
                     orderbook_sell=orderbook_sell,
                 )
+                profit_metrics = ProfitCalculator.calculate_net_profitability(request)
 
                 net_margin_pct = profit_metrics["net_margin_pct"]
                 gross_margin_pct = profit_metrics["gross_margin_pct"]

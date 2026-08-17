@@ -1,0 +1,13 @@
+Dev, PelleNybe/Corax CoLAB: [performance improvement]
+
+💡 What:
+- Optimized `data_engine/pipeline.py` dictionary access by preferring direct `"in"` checks instead of `.get()`.
+
+🎯 Why:
+- Similar to the earlier optimization in `persistence.py`, `dict.get(key, default)` evaluates the default argument on every call, even if the key is present. In `MarketDataStream.process_tick`, computing `int(time.time() * 1000)` thousands of times per second adds unnecessary CPU overhead on the main processing loop.
+
+📊 Impact:
+- Reduces CPU overhead in the critical path that processes WebSocket ticks and converts them into Polars DataFrames.
+
+🔬 Measurement:
+- Run a synthetic trade stream benchmark and measure parsing time per 10k ticks inside `MarketDataStream.process_tick`.

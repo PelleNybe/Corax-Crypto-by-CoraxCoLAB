@@ -45,14 +45,27 @@ class TickLogger:
                 trades = trade_event["data"]
 
                 for t in trades:
-                    tick = {
-                        "symbol": symbol,
-                        "timestamp": t.get("timestamp", int(time.time() * 1000)),
-                        "price": float(t.get("price", 0.0)),
-                        "volume": float(t.get("amount", 0.0)),
-                        "side": t.get("side", "unknown"),
-                        "exchange": exchange_id,
-                    }
+                    # Performance optimization: using tuples instead of dicts for faster DataFrame initialization
+                    try:
+                        tick = (
+                            symbol,
+                            t["timestamp"]
+                            if "timestamp" in t
+                            else int(time.time() * 1000),
+                            float(t["price"]) if "price" in t else 0.0,
+                            float(t["amount"]) if "amount" in t else 0.0,
+                            t["side"] if "side" in t else "unknown",
+                            exchange_id,
+                        )
+                    except KeyError:
+                        tick = (
+                            symbol,
+                            t.get("timestamp", int(time.time() * 1000)),
+                            float(t.get("price", 0.0)),
+                            float(t.get("amount", 0.0)),
+                            t.get("side", "unknown"),
+                            exchange_id,
+                        )
                     self._buffer.append(tick)
 
                 if len(self._buffer) >= self.buffer_size:
@@ -76,7 +89,12 @@ class TickLogger:
             buffer_copy = list(self._buffer)
             self._buffer.clear()
 
-            df = pl.DataFrame(buffer_copy, schema=self._schema)
+            # Performance optimization: orient='row' with tuple lists avoids slow python-level dictionary unpacking
+            df = pl.DataFrame(
+                buffer_copy, schema=list(self._schema.keys()), orient="row"
+            )
+            # Chain cast operations for optimal typed initialization
+            df = df.cast(self._schema)
             # Polars I/O blocking call must be dispatched to thread
             await asyncio.to_thread(self._write_parquet_blocking, df)
 

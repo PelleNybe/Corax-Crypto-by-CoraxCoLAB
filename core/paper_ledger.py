@@ -1,5 +1,6 @@
 from loguru import logger
 from typing import Dict
+from schemas.orders import OrderContext
 
 
 class PaperLedger:
@@ -60,28 +61,25 @@ class PaperLedger:
 
     async def execute_virtual_order(
         self,
-        symbol: str,
-        side: str,
-        order_type: str,
-        amount: float,
-        current_price: float = None,
+        context: OrderContext,
     ):
         """
+
         Executes a virtual trade, updates balances and records the history.
         """
-        if not current_price:
+        if not context.current_price:
             from core.state import global_state
 
             # Fallback to fetching latest price from state if not provided
             summary = global_state.get_summary()
-            current_price = summary.get("last_price", 50000.0)
+            context.current_price = summary.get(f"price_{context.symbol}", 0.0)
 
-        slippage_pct = self._simulate_slippage(order_type, amount)
-        fee_rate = self.maker_fee if order_type == "limit" else self.taker_fee
+        slippage_pct = self._simulate_slippage(context.order_type, context.amount)
+        fee_rate = self.maker_fee if context.order_type == "limit" else self.taker_fee
 
-        if side.lower() == "buy":
-            exec_price = current_price * (1 + slippage_pct)
-            trade_cost = amount * exec_price
+        if context.side.lower() == "buy":
+            exec_price = context.current_price * (1 + slippage_pct)
+            trade_cost = context.amount * exec_price
             fee = trade_cost * fee_rate
             total_deduction = trade_cost + fee
 
@@ -92,39 +90,41 @@ class PaperLedger:
                 return False
 
             self.balance -= total_deduction
-            self.positions[symbol] = self.positions.get(symbol, 0.0) + amount
-
-            logger.info(
-                f"📃 DRY RUN BUY {amount} {symbol} @ {exec_price:.2f} (Fee: ${fee:.2f}, Slip: {slippage_pct * 100:.3f}%)"
+            self.positions[context.symbol] = (
+                self.positions.get(context.symbol, 0.0) + context.amount
             )
 
-        elif side.lower() == "sell":
+            logger.info(
+                f"📃 DRY RUN BUY {context.amount} {context.symbol} @ {exec_price:.2f} (Fee: ${fee:.2f}, Slip: {slippage_pct * 100:.3f}%)"
+            )
+
+        elif context.side.lower() == "sell":
             # Check inventory (can allow shorting by tracking negative positions, but we'll stick to spot logic for now)
-            current_pos = self.positions.get(symbol, 0.0)
-            if current_pos < amount:
+            current_pos = self.positions.get(context.symbol, 0.0)
+            if current_pos < context.amount:
                 logger.warning(
-                    f"DRY RUN INSUFFICIENT ASSET: Trying to sell {amount}, hold {current_pos}"
+                    f"DRY RUN INSUFFICIENT ASSET: Trying to sell {context.amount}, hold {current_pos}"
                 )
                 return False
 
-            exec_price = current_price * (1 - slippage_pct)
-            gross_proceeds = amount * exec_price
+            exec_price = context.current_price * (1 - slippage_pct)
+            gross_proceeds = context.amount * exec_price
             fee = gross_proceeds * fee_rate
             net_proceeds = gross_proceeds - fee
 
             self.balance += net_proceeds
-            self.positions[symbol] -= amount
+            self.positions[context.symbol] -= context.amount
 
             logger.info(
-                f"📃 DRY RUN SELL {amount} {symbol} @ {exec_price:.2f} (Fee: ${fee:.2f}, Slip: {slippage_pct * 100:.3f}%)"
+                f"📃 DRY RUN SELL {context.amount} {context.symbol} @ {exec_price:.2f} (Fee: ${fee:.2f}, Slip: {slippage_pct * 100:.3f}%)"
             )
 
         self.trade_history.append(
             {
-                "symbol": symbol,
-                "side": side,
-                "type": order_type,
-                "amount": amount,
+                "symbol": context.symbol,
+                "side": context.side,
+                "type": context.order_type,
+                "amount": context.amount,
                 "exec_price": exec_price,
                 "fee": fee,
             }

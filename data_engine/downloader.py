@@ -107,22 +107,16 @@ class HistoricalDataDownloader:
             f"Fetched {len(all_ohlcv)} rows. Converting to Polars LazyFrame and saving to Parquet."
         )
 
-        # Structure the data
-        formatted_data = []
-        for row in all_ohlcv:
-            formatted_data.append(
-                {
-                    "timestamp": int(row[0]),
-                    "open": float(row[1]),
-                    "high": float(row[2]),
-                    "low": float(row[3]),
-                    "close": float(row[4]),
-                    "volume": float(row[5]),
-                    "symbol": symbol,
-                }
+        # Structure the data directly using Polars for high performance
+        df = (
+            pl.DataFrame(
+                all_ohlcv,
+                schema=["timestamp", "open", "high", "low", "close", "volume"],
+                orient="row",
             )
-
-        df = pl.DataFrame(formatted_data, schema=self.schema)
+            .with_columns(pl.lit(symbol).alias("symbol"))
+            .cast(self.schema)
+        )
 
         # Save partitioned by symbol and timeframe
         safe_symbol = symbol.replace("/", "_")

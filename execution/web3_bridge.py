@@ -41,13 +41,49 @@ class Web3Bridge:
         # e.g., await self.w3.eth.subscribe('newPendingTransactions')
 
         while True:
-            # Simulated block polling
+            # Simple block polling (Note: WS subscription is better for prod, but HTTP polling is fully functional)
             try:
-                await self.w3.eth.get_block("latest")
-                # logger.debug(f"Tracked new block: {latest_block.number} with {len(latest_block.transactions)} txs")
+                latest_block = await self.w3.eth.get_block("latest")
+                logger.debug(
+                    f"Tracked new block: {latest_block.number} with {len(latest_block.transactions)} txs"
+                )
                 await asyncio.sleep(12)  # ~Ethereum block time
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.warning(f"Web3 polling error: {e}")
                 await asyncio.sleep(5)
+
+    async def sniff_mempool(self, target_router_address: str):
+        """
+        Listens to pending transactions in the mempool to front-run large DEX swaps.
+        """
+        if not self.w3.is_connected():
+            return
+
+        logger.info(f"Started mempool sniffing for router: {target_router_address}")
+        try:
+            # Note: This requires a WSS endpoint that supports newPendingTransactions
+            pending_filter = await self.w3.eth.filter("pending")
+            while True:
+                new_entries = await pending_filter.get_new_entries()
+                for tx_hash in new_entries:
+                    # Dispatch to background task to not block the loop
+                    asyncio.create_task(
+                        self._analyze_pending_tx(tx_hash, target_router_address)
+                    )
+                await asyncio.sleep(0.1)
+        except Exception as e:
+            logger.error(f"Mempool sniffing error: {e}")
+
+    async def _analyze_pending_tx(self, tx_hash: str, target_router: str):
+        try:
+            tx = await self.w3.eth.get_transaction(tx_hash)
+            if tx and tx["to"] and tx["to"].lower() == target_router.lower():
+                value_eth = self.w3.from_wei(tx["value"], "ether")
+                if value_eth > 10:  # Arbitrary whale threshold
+                    logger.warning(
+                        f"🐋 WHALE ALERT: Pending tx {tx_hash.hex()} sending {value_eth} ETH to router!"
+                    )
+        except Exception:
+            pass  # Transaction might be dropped or not found yet

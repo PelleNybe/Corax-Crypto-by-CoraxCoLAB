@@ -30,6 +30,14 @@ class CoraxTelegramInterface:
     def _register_handlers(self):
         @self.dp.message(CommandStart())
         async def send_welcome(message: types.Message):
+            if (
+                not settings.TELEGRAM_CHAT_ID
+                or str(message.from_user.id) != settings.TELEGRAM_CHAT_ID
+            ):
+                logger.warning(
+                    f"Unauthorized Telegram access attempt from user_id: {message.from_user.id} in chat_id: {message.chat.id}"
+                )
+                return
             await message.reply(
                 "Corax Crypto Omni-Channel Command Center online.\n"
                 "You can speak to me naturally. E.g., 'What is the current status?', 'Pause trading', 'Hit the kill switch', 'Bridge 100 USDC to Arbitrum'."
@@ -37,6 +45,15 @@ class CoraxTelegramInterface:
 
         @self.dp.message()
         async def handle_message(message: types.Message):
+            if (
+                not settings.TELEGRAM_CHAT_ID
+                or str(message.from_user.id) != settings.TELEGRAM_CHAT_ID
+            ):
+                logger.warning(
+                    f"Unauthorized Telegram access attempt from user_id: {message.from_user.id} in chat_id: {message.chat.id}"
+                )
+                return
+
             user_text = message.text
             logger.info(f"Received Telegram message: {user_text}")
 

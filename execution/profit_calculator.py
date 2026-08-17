@@ -7,6 +7,33 @@ Designed for both scalar operations and vectorised Polars pipelines.
 
 import polars as pl
 from typing import Dict, Any
+from pydantic import BaseModel
+
+
+class ProfitConfig(BaseModel):
+    penalty_rate: float = 0.005
+    base_slippage_pct: float = 0.0001
+    trade_size_usd_fallback: float = 1000.0
+
+
+class MarginExprConfig(BaseModel):
+    ask_col: str
+    bid_col: str
+    exchange_buy: str
+    exchange_sell: str
+    trade_size_usd: float | None = None
+    config: ProfitConfig = ProfitConfig()
+
+
+class ProfitabilityRequest(BaseModel):
+    symbol: str
+    exchange_buy: str
+    exchange_sell: str
+    ask_price: float
+    bid_price: float
+    trade_amount_base: float
+    orderbook_buy: Dict[str, Any]
+    orderbook_sell: Dict[str, Any]
 
 
 class ProfitCalculator:
@@ -48,87 +75,83 @@ class ProfitCalculator:
     @classmethod
     def estimate_slippage(
         cls,
-        orderbook_buy: Dict[str, Any],
-        orderbook_sell: Dict[str, Any],
-        trade_amount_base: float,
-        price_buy: float,
-        price_sell: float,
+        request: ProfitabilityRequest,
+        config: ProfitConfig = None,
     ) -> float:
         """
         Estimates slippage in USD based on orderbook top level depth.
         Penalizes the spread if the trade size exceeds the top-of-book volume.
 
         Args:
-            orderbook_buy (Dict[str, Any]): The orderbook for the buy exchange.
-            orderbook_sell (Dict[str, Any]): The orderbook for the sell exchange.
-            trade_amount_base (float): The amount of base asset to trade.
-            price_buy (float): The top ask price on the buy exchange.
-            price_sell (float): The top bid price on the sell exchange.
+            request (ProfitabilityRequest): Request object with orderbooks and trade details.
+            config (ProfitConfig): Configuration for slippage penalties.
 
         Returns:
             float: Estimated slippage cost in USD.
         """
-        buy_top_amt = orderbook_buy["asks"][0][1] if orderbook_buy["asks"] else 0.0
-        sell_top_amt = orderbook_sell["bids"][0][1] if orderbook_sell["bids"] else 0.0
+        config = config or ProfitConfig()
+        buy_top_amt = (
+            request.orderbook_buy["asks"][0][1]
+            if request.orderbook_buy["asks"]
+            else 0.0
+        )
+        sell_top_amt = (
+            request.orderbook_sell["bids"][0][1]
+            if request.orderbook_sell["bids"]
+            else 0.0
+        )
 
         slippage_penalty = 0.0
 
-        # 0.5% severe slippage for amounts exceeding top-of-book depth
-        penalty_rate = 0.005
-
-        if trade_amount_base > buy_top_amt:
+        if request.trade_amount_base > buy_top_amt:
             slippage_penalty += (
-                (trade_amount_base - buy_top_amt) * price_buy * penalty_rate
+                (request.trade_amount_base - buy_top_amt)
+                * request.ask_price
+                * config.penalty_rate
             )
 
-        if trade_amount_base > sell_top_amt:
+        if request.trade_amount_base > sell_top_amt:
             slippage_penalty += (
-                (trade_amount_base - sell_top_amt) * price_sell * penalty_rate
+                (request.trade_amount_base - sell_top_amt)
+                * request.bid_price
+                * config.penalty_rate
             )
 
-        # Base slippage of 1 bps for all trades
-        base_slippage = (trade_amount_base * price_buy) * 0.0001
+        base_slippage = (
+            request.trade_amount_base * request.ask_price
+        ) * config.base_slippage_pct
 
         return slippage_penalty + base_slippage
 
     @classmethod
     def calculate_net_profitability(
         cls,
-        symbol: str,
-        exchange_buy: str,
-        exchange_sell: str,
-        ask_price: float,
-        bid_price: float,
-        trade_amount_base: float,
-        orderbook_buy: Dict[str, Any],
-        orderbook_sell: Dict[str, Any],
+        request: ProfitabilityRequest,
+        config: ProfitConfig = None,
     ) -> Dict[str, float]:
         """
         Calculates net profitability for a given arbitrage opportunity.
 
         Args:
-            symbol (str): The trading pair symbol.
-            exchange_buy (str): The exchange to buy from.
-            exchange_sell (str): The exchange to sell to.
-            ask_price (float): The lowest ask price on the buy exchange.
-            bid_price (float): The highest bid price on the sell exchange.
-            trade_amount_base (float): The base asset amount to trade.
-            orderbook_buy (Dict[str, Any]): The L2 orderbook of the buy exchange.
-            orderbook_sell (Dict[str, Any]): The L2 orderbook of the sell exchange.
+            request (ProfitabilityRequest): A request object containing all necessary parameters.
+            config (ProfitConfig): Configuration for slippage penalties.
 
         Returns:
             Dict[str, float]: A dictionary containing gross and net margins and costs.
         """
-        trade_size_usd = trade_amount_base * ask_price
-        gross_profit_usd = (bid_price - ask_price) * trade_amount_base
+        config = config or ProfitConfig()
+        trade_size_usd = request.trade_amount_base * request.ask_price
+        gross_profit_usd = (
+            request.bid_price - request.ask_price
+        ) * request.trade_amount_base
         gross_margin_pct = (
             (gross_profit_usd / trade_size_usd) * 100 if trade_size_usd > 0 else 0.0
         )
 
-        cex_fees_usd = cls.calculate_fees(exchange_buy, exchange_sell, trade_size_usd)
-        slippage_usd = cls.estimate_slippage(
-            orderbook_buy, orderbook_sell, trade_amount_base, ask_price, bid_price
+        cex_fees_usd = cls.calculate_fees(
+            request.exchange_buy, request.exchange_sell, trade_size_usd
         )
+        slippage_usd = cls.estimate_slippage(request, config=config)
         on_chain_fees_usd = cls.ON_CHAIN_GAS_FEE_USD
 
         net_profit_usd = (
@@ -150,36 +173,42 @@ class ProfitCalculator:
     @classmethod
     def get_net_margin_expr(
         cls,
-        ask_col: str,
-        bid_col: str,
-        exchange_buy: str,
-        exchange_sell: str,
-        trade_size_usd: float = 1000.0,
+        expr_config: MarginExprConfig,
     ) -> pl.Expr:
         """
         Generates a Polars Expression to calculate net margin across an entire DataFrame.
         This enables blazingly fast vectorised backtesting and scanning.
 
         Args:
-            ask_col (str): Column name for the ask price.
-            bid_col (str): Column name for the bid price.
-            exchange_buy (str): Exchange identifier for the buy leg.
-            exchange_sell (str): Exchange identifier for the sell leg.
-            trade_size_usd (float): Assumed trade size in USD for calculating flat costs.
+            expr_config (MarginExprConfig): Configuration for generating the net margin expression.
 
         Returns:
             pl.Expr: A Polars expression evaluating to the net margin percentage.
         """
-        fee_buy = cls.CEX_FEES.get(exchange_buy, cls.CEX_FEES["default"])["taker"]
-        fee_sell = cls.CEX_FEES.get(exchange_sell, cls.CEX_FEES["default"])["taker"]
+        config = expr_config.config
+        trade_size_usd = (
+            expr_config.trade_size_usd
+            if expr_config.trade_size_usd is not None
+            else config.trade_size_usd_fallback
+        )
+
+        fee_buy = cls.CEX_FEES.get(expr_config.exchange_buy, cls.CEX_FEES["default"])[
+            "taker"
+        ]
+        fee_sell = cls.CEX_FEES.get(expr_config.exchange_sell, cls.CEX_FEES["default"])[
+            "taker"
+        ]
         total_fee_pct = fee_buy + fee_sell
 
-        base_slippage_pct = 0.0001
         on_chain_pct = (
             cls.ON_CHAIN_GAS_FEE_USD / trade_size_usd if trade_size_usd > 0 else 0.0
         )
 
-        gross_margin = (pl.col(bid_col) - pl.col(ask_col)) / pl.col(ask_col)
-        net_margin = gross_margin - total_fee_pct - base_slippage_pct - on_chain_pct
+        gross_margin = (
+            pl.col(expr_config.bid_col) - pl.col(expr_config.ask_col)
+        ) / pl.col(expr_config.ask_col)
+        net_margin = (
+            gross_margin - total_fee_pct - config.base_slippage_pct - on_chain_pct
+        )
 
         return net_margin * 100.0

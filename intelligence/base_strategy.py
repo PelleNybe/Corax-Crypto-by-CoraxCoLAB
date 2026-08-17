@@ -52,7 +52,7 @@ class CoraxStrategy(ABC):
         Calculates and adds all necessary indicators to the DataFrame.
         Must return the modified LazyFrame.
         """
-        pass
+        raise NotImplementedError
 
     @abstractmethod
     def populate_signals(self, df: pl.LazyFrame) -> pl.LazyFrame:
@@ -60,4 +60,4 @@ class CoraxStrategy(ABC):
         Evaluates conditions and populates 'buy' and 'sell' boolean signal columns.
         Must return the modified LazyFrame.
         """
-        pass
+        raise NotImplementedError

@@ -55,10 +55,12 @@ To meet the high-speed requirements of the HFT Darwin Engine, `ProfitCalculator.
 # Example Polars implementation
 df = df.with_columns(
     net_margin=ProfitCalculator.get_net_margin_expr(
-        ask_col="best_ask",
-        bid_col="best_bid",
-        exchange_buy="binance",
-        exchange_sell="okx"
+        MarginExprConfig(
+            ask_col="best_ask",
+            bid_col="best_bid",
+            exchange_buy="binance",
+            exchange_sell="okx"
+        )
     )
 )
 ```

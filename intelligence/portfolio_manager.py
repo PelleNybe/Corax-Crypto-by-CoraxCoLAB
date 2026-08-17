@@ -67,9 +67,15 @@ class PortfolioManager:
                 # Strict Directive: async to_thread for collect
                 df = await asyncio.to_thread(strat_df.collect)
 
+                # In a real system confidence is derived from the indicator magnitude
+                # We extract the last confidence if available or default to 0.8
+                confidence = 0.8
+                if "confidence" in df.columns:
+                    confidence = float(df[-1]["confidence"][0])
+
                 signals[name] = {
                     "action": self._evaluate_signal(df),
-                    "confidence": 0.8,  # Dummy confidence for now
+                    "confidence": confidence,
                 }
             except Exception as e:
                 logger.error(f"Error executing strategy {name}: {e}")
@@ -104,20 +110,38 @@ class PortfolioManager:
         logger.info("Requesting LLM Copilot consensus...")
         logger.debug(f"Prompt: {prompt}")
 
-        # Simulate LLM call since we don't have direct LLM generation hooked up in this dummy setup
-        await asyncio.sleep(0.5)
+        # Hooking up real LLM generation via CoraxCopilot
+        try:
+            response = await self.copilot.generate_synthesis(
+                {
+                    "context": market_context,
+                    "signals": json.dumps(signals),
+                    "instruction": "Evaluate signals and return a single final action (BUY, SELL, or HOLD).",
+                }
+            )
 
-        buy_votes = sum(1 for s in signals.values() if s["action"] == "BUY")
-        sell_votes = sum(1 for s in signals.values() if s["action"] == "SELL")
+            response_upper = response.upper()
+            if "BUY" in response_upper and "SELL" not in response_upper:
+                final_action = "BUY"
+            elif "SELL" in response_upper and "BUY" not in response_upper:
+                final_action = "SELL"
+            else:
+                final_action = "HOLD"
 
-        if buy_votes > sell_votes:
-            final_action = "BUY"
-        elif sell_votes > buy_votes:
-            final_action = "SELL"
-        else:
-            final_action = "HOLD"
+            reasoning = f"LLM Evaluated Consensus: {response[:100]}..."
+        except Exception as e:
+            logger.warning(f"LLM copilot failed, falling back to basic voting: {e}")
+            buy_votes = sum(1 for s in signals.values() if s["action"] == "BUY")
+            sell_votes = sum(1 for s in signals.values() if s["action"] == "SELL")
 
-        reasoning = f"LLM Consensus based on {len(signals)} signals. Buy: {buy_votes}, Sell: {sell_votes}."
+            if buy_votes > sell_votes:
+                final_action = "BUY"
+            elif sell_votes > buy_votes:
+                final_action = "SELL"
+            else:
+                final_action = "HOLD"
+
+            reasoning = f"Basic Voting Consensus based on {len(signals)} signals. Buy: {buy_votes}, Sell: {sell_votes}."
 
         return AISignal(
             timestamp=int(time.time() * 1000),

@@ -1,21 +1,20 @@
 <div align="center">
-  <img src="assets/coraxcryptologo.png" alt="Corax Crypto Logo" width="400" />
+  <img src="assets/coraxcryptologo.png" alt="Corax Crypto Logo" width="300" style="filter: drop-shadow(0 0 20px rgba(0, 255, 204, 0.8));" />
 
-  <h1 style="color: #00ffcc; text-transform: uppercase; letter-spacing: 2px;">
-    Corax Crypto <br>
-    <span style="font-size: 0.5em; color: #ff0055;">Autonomous HFT Agent</span>
-  </h1>
-  <p style="font-size: 1.2rem; color: #a0aec0; margin-bottom: 20px;">
-    <i>Quantum Spatial Interface • 100% Polars-Native Execution • Web3 Cross-Chain Bridging</i>
+  <br><br>
+
+  <a href="https://readme-typing-svg.demolab.com?font=Fira+Code&weight=700&size=30&pause=1000&color=00FFCC&center=true&vCenter=true&width=600&lines=Autonomous+Economic+Actor;High-Frequency+Trading+Platform;Quantum+Market+Dashboard;Polars-Native+Arbitrage+Engine">
+    <img src="https://readme-typing-svg.demolab.com?font=Fira+Code&weight=700&size=30&pause=1000&color=00FFCC&center=true&vCenter=true&width=600&lines=Autonomous+Economic+Actor;High-Frequency+Trading+Platform;Quantum+Market+Dashboard;Polars-Native+Arbitrage+Engine" alt="Typing SVG" />
+  </a>
+
+  <p style="font-size: 1.2em; color: #a0aec0; margin-top: 10px;">
+    Next-generation, asynchronous HFT bridging quantitative execution, decentralized settlement, and macro intelligence.
   </p>
 
-  <!-- Badges -->
   <p>
-    <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python" /></a>
-    <a href="https://pola.rs/"><img src="https://img.shields.io/badge/Polars-Blazing_Fast-cd792c?style=for-the-badge&logo=polars&logoColor=white" alt="Polars" /></a>
-    <a href="https://fastapi.tiangolo.com/"><img src="https://img.shields.io/badge/FastAPI-Async_Core-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI" /></a>
-    <a href="https://docs.docker.com/"><img src="https://img.shields.io/badge/Docker-Containerized-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker" /></a>
-    <a href="https://www.circle.com/"><img src="https://img.shields.io/badge/Circle-W3S_Integration-8A2BE2?style=for-the-badge&logo=circle&logoColor=white" alt="Circle" /></a>
+    <a href="https://python.org/"><img src="https://img.shields.io/badge/Python-3.11+-blue?style=for-the-badge&logo=python&logoColor=white" alt="Python" /></a>
+    <a href="https://pola.rs/"><img src="https://img.shields.io/badge/Data-Polars-orange?style=for-the-badge&logo=polars&logoColor=white" alt="Polars" /></a>
+    <a href="https://fastapi.tiangolo.com/"><img src="https://img.shields.io/badge/API-FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI" /></a>
     <a href="https://threejs.org/"><img src="https://img.shields.io/badge/WebGL-Three.js-black?style=for-the-badge&logo=three.js&logoColor=white" alt="WebGL" /></a>
     <img src="https://img.shields.io/badge/Status-Actively_Developed-brightgreen?style=for-the-badge" alt="Status" />
   </p>
@@ -113,6 +112,7 @@ Experience the market through our fully immersive 3D WebGL interface.
 *   **Data Layer:** `Polars` for dataframes, `PyArrow` for Parquet data persistence. Millisecond-level HFT execution loop.
 *   **API & Comms:** decoupled `FastAPI` + `Uvicorn` layer serving real-time WebSockets to the frontend.
 *   **Trading:** `ccxt.pro` for async Level 2 depth streaming. Dynamic Profitability Calculator accounts for CEX fees, slippage, and on-chain bridge fees.
+*   **Performance Optimization:** DOM updates are batched using Node Cloning, fast O(N) array loops, flat contiguous memory arrays, hardware accelerated CSS animations and strictly synced frame refreshes.
 *   **UI/Visualization:** Vanilla JS, `Three.js` (WebGL) for the 3D Quantum Market Dashboard, `Lightweight Charts` for candlestick rendering.
 *   **Risk Management:** Strict enforcement of max risk percentage, daily drawdown limits (Kill Switch), and dynamic ATR Trailing Stops.
 </details>
@@ -152,7 +152,9 @@ poetry run python main.py
   <div style="position: absolute; top: -50px; left: -50px; width: 100px; height: 100px; background: #00ffcc; filter: blur(50px); opacity: 0.5;"></div>
   <div style="position: absolute; bottom: -50px; right: -50px; width: 100px; height: 100px; background: #ff0055; filter: blur(50px); opacity: 0.3;"></div>
 
-  <img src="https://avatars.githubusercontent.com/u/10492815?v=4" alt="Pelle Nyberg" width="150" style="border-radius: 50%; border: 3px solid #00ffcc; box-shadow: 0px 8px 24px rgba(0,255,204,0.4); margin-bottom: 20px; position: relative; z-index: 10;" />
+  <a href="https://github.com/PelleNybe">
+    <img src="https://avatars.githubusercontent.com/u/10492815?v=4" alt="Pelle Nyberg" width="150" style="border-radius: 50%; border: 3px solid #00ffcc; box-shadow: 0px 8px 24px rgba(0,255,204,0.4); margin-bottom: 20px; position: relative; z-index: 10;" />
+  </a>
 
   <h2 style="color: #ffffff; margin: 0; font-size: 2.5em; letter-spacing: 1px; position: relative; z-index: 10;">Pelle Nyberg</h2>
   <p style="color: #00ffcc; font-size: 1.2em; margin-top: 5px; font-weight: bold; position: relative; z-index: 10;">

@@ -2,7 +2,8 @@ import asyncio
 import time
 import ccxt.pro as ccxtpro
 from loguru import logger
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
+from schemas.orders import OrderContext
 from core.config import settings
 
 
@@ -58,26 +59,99 @@ class ExchangeManager:
         self._monitor_tasks: List[asyncio.Task] = []
 
     async def initialize(self):
-        """Initializes all exchange connections based on ARBITRAGE_EXCHANGES config."""
-        logger.info(
-            f"Initializing Unified Exchange Manager with: {settings.ARBITRAGE_EXCHANGES}"
-        )
-        for exchange_id in settings.ARBITRAGE_EXCHANGES:
+        """Initializes all exchange connections based on config."""
+        import json
+
+        # Load Main Account
+        exchanges_to_load = {
+            settings.EXCHANGE_ID or "": {
+                "exchange": settings.EXCHANGE_ID or "",
+                "apiKey": settings.EXCHANGE_API_KEY,
+                "secret": settings.EXCHANGE_API_SECRET,
+                "password": settings.EXCHANGE_PASSPHRASE,
+            }
+        }
+
+        # Load Arbitrage Accounts (Read-only usually, but mapped)
+        for ex in settings.ARBITRAGE_EXCHANGES:
+            if ex not in exchanges_to_load:
+                exchanges_to_load[ex] = {"exchange": ex}
+
+        # Load Multi-Accounts (Copy Trading)
+        if settings.COPY_TRADE_ENABLED:
             try:
+                multi_cfg = json.loads(settings.MULTI_ACCOUNT_CONFIG)
+                for account_id, creds in multi_cfg.items():
+                    if "exchange" in creds:
+                        # Append account_id to make it unique in self.exchanges map
+                        exchanges_to_load[f"{creds['exchange']}_{account_id}"] = creds
+            except Exception as e:
+                logger.error(f"Failed to parse MULTI_ACCOUNT_CONFIG: {e}")
+
+        logger.info(
+            f"Initializing Unified Exchange Manager with accounts: {list(exchanges_to_load.keys())}"
+        )
+
+        for account_key, creds in exchanges_to_load.items():
+            exchange_id = creds["exchange"]
+
+            # Special handling for Web3 native DEXs (Not in CCXT by default)
+            if exchange_id in ["uniswap", "pancakeswap", "curve"]:
+                logger.info(
+                    f"Skipping CCXT load for native DEX: {exchange_id}. Managed via Web3Bridge."
+                )
+                continue
+
+            try:
+                if not hasattr(ccxtpro, exchange_id):
+                    logger.warning(
+                        f"Exchange {exchange_id} is not supported by ccxt.pro."
+                    )
+                    continue
+
                 exchange_class = getattr(ccxtpro, exchange_id)
                 auth_params = {
                     "enableRateLimit": True,
                     "newUpdates": True,  # Required to get only new updates from orderbooks
+                    "options": {
+                        "defaultType": settings.MARKET_TYPE,  # e.g. "spot", "future", "swap"
+                    },
                 }
 
-                # Apply auth for the primary exchange
-                if exchange_id == settings.EXCHANGE_ID:
-                    auth_params["apiKey"] = settings.EXCHANGE_API_KEY
-                    auth_params["secret"] = settings.EXCHANGE_API_SECRET
-                    if settings.EXCHANGE_PASSPHRASE:
-                        auth_params["password"] = settings.EXCHANGE_PASSPHRASE
+                if "apiKey" in creds:
+                    auth_params["apiKey"] = creds["apiKey"]
+                    auth_params["secret"] = creds["secret"]
+                    if creds.get("password"):
+                        auth_params["password"] = creds["password"]
 
-                self.exchanges[exchange_id] = exchange_class(auth_params)
+                self.exchanges[account_key] = exchange_class(auth_params)
+
+                # Setup institutional leverage if applicable
+                if settings.MARKET_TYPE in ["future", "swap", "margin"]:
+                    try:
+                        # Wait for markets to load before setting leverage
+                        # Note: We do this asynchronously in a background task to not block init
+                        async def set_leverage(acc_key, ex):
+                            await ex.load_markets()
+                            for symbol in ex.markets.keys():
+                                try:
+                                    if symbol.endswith("/USDT:USDT") or symbol.endswith(
+                                        "/USDT"
+                                    ):
+                                        await ex.set_leverage(settings.LEVERAGE, symbol)
+                                except Exception:
+                                    pass  # Many exchanges only allow setting leverage per-symbol, some globally.
+                            logger.info(
+                                f"[{acc_key}] Leverage set to {settings.LEVERAGE}x"
+                            )
+
+                        if hasattr(self.exchanges[account_key], "set_leverage"):
+                            asyncio.create_task(
+                                set_leverage(account_key, self.exchanges[account_key])
+                            )
+                    except Exception as e:
+                        logger.warning(f"Could not set leverage on {account_key}: {e}")
+
                 if settings.CORAX_MODE.lower() == "testnet":
                     self.exchanges[exchange_id].set_sandbox_mode(True)
                     logger.info(f"Enabled Sandbox mode for {exchange_id}")
@@ -243,11 +317,8 @@ class ExchangeManager:
     async def execute_order(
         self,
         exchange_id: str,
-        symbol: str,
-        type: str,
-        side: str,
-        amount: float,
-        price: Optional[float] = None,
+        context: OrderContext,
+        params: dict = None,
     ) -> Any:
         """Executes an order using the centralized rate limiter."""
         if exchange_id not in self.exchanges:
@@ -261,9 +332,20 @@ class ExchangeManager:
         exchange = self.exchanges[exchange_id]
         try:
             logger.debug(
-                f"Creating {side} {type} order for {amount} {symbol} on {exchange_id}"
+                f"Creating {context.side} {context.order_type} order for {context.amount} {context.symbol} on {exchange_id}"
             )
-            order = await exchange.create_order(symbol, type, side, amount, price)
+
+            if params is None:
+                params = {}
+            order = await exchange.create_order(
+                context.symbol,
+                context.order_type,
+                context.side,
+                context.amount,
+                context.current_price,
+                params,
+            )
+
             return order
         except Exception as e:
             logger.error(f"Error creating order on {exchange_id}: {e}")
@@ -307,3 +389,32 @@ class ExchangeManager:
 
 
 exchange_manager = ExchangeManager()
+
+
+class AccountManager:
+    """Manages multiple CCXT exchange instances for different sub-accounts."""
+
+    def __init__(self):
+        self.accounts: Dict[str, Any] = {}
+
+    async def add_account(
+        self, account_id: str, exchange_id: str, api_key: str, api_secret: str
+    ):
+        if not hasattr(ccxtpro, exchange_id):
+            raise ValueError(f"Exchange {exchange_id} not supported by ccxt.pro")
+
+        exchange_class = getattr(ccxtpro, exchange_id)
+        self.accounts[account_id] = exchange_class(
+            {
+                "apiKey": api_key,
+                "secret": api_secret,
+                "enableRateLimit": True,
+                "options": {"defaultType": getattr(settings, "MARKET_TYPE", "spot")},
+            }
+        )
+
+    async def get_all_accounts(self) -> Dict[str, Any]:
+        return self.accounts
+
+
+account_manager = AccountManager()

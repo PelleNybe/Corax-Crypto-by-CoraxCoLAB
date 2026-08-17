@@ -44,11 +44,17 @@ class RiskManager:
 
     async def register_position(self, symbol: str, entry_price: float, amount: float):
         """Registers a new active position for trailing stop monitoring."""
+        import time
+
         self.active_positions[symbol] = {
             "entry_price": entry_price,
             "amount": amount,
             "high_watermark": entry_price,
             "trailing_stop_price": entry_price * (1 - self.trailing_stop_pct),
+            "opened_at": int(time.time()),
+            "dca_orders": 1,
+            "ttp_active": False,
+            "ttp_high": entry_price,
         }
         logger.debug(
             f"Registered position {symbol} at {entry_price} with TSL at {self.active_positions[symbol]['trailing_stop_price']}"
@@ -148,3 +154,47 @@ class RiskManager:
         logger.success(
             f"🛡️ RiskManager manually reset. New baseline: ${current_balance:.2f} USDC"
         )
+
+    async def check_trailing_take_profit(
+        self, symbol: str, current_price: float
+    ) -> bool:
+        """
+        3Commas-style Smart Trade logic.
+        If profit exceeds TTP_ACTIVATION_PCT, it turns on a trailing floor.
+        If price drops below that dynamic floor, it locks in the profit and returns True.
+        """
+        if symbol not in self.active_positions:
+            return False
+
+        pos = self.active_positions[symbol]
+        entry_price = pos["entry_price"]
+        profit_pct = (current_price - entry_price) / entry_price
+
+        # 1. Check if we should activate TTP
+        if not pos.get("ttp_active", False):
+            if profit_pct >= settings.TTP_ACTIVATION_PCT:
+                pos["ttp_active"] = True
+                pos["ttp_high"] = current_price
+                logger.success(
+                    f"📈 Trailing Take Profit ACTIVATED for {symbol} at {profit_pct:.2%} profit!"
+                )
+            return False
+
+        # 2. Update TTP High Watermark
+        if current_price > pos["ttp_high"]:
+            pos["ttp_high"] = current_price
+            logger.debug(f"[{symbol}] TTP new high watermark: {current_price:.2f}")
+            return False
+
+        # 3. Check for trailing pullback
+        # Calculate the dynamic floor based on the highest price reached since activation
+        trailing_floor = pos["ttp_high"] * (1 - settings.TTP_TRAILING_PCT)
+
+        if current_price <= trailing_floor:
+            locked_profit = (trailing_floor - entry_price) / entry_price
+            logger.warning(
+                f"✅ SMART TRADE TRIGGERED for {symbol}: Pullback hit trailing floor {trailing_floor:.2f}. Locking in {locked_profit:.2%} profit!"
+            )
+            return True
+
+        return False

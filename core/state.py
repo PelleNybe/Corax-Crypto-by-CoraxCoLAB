@@ -1,6 +1,7 @@
 import asyncio
 from loguru import logger
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Deque
+from collections import deque
 from schemas.signals import AISignal
 from core.config import settings
 
@@ -15,8 +16,9 @@ class GlobalState:
     def __init__(self):
         self._lock = asyncio.Lock()
         self.latest_signal: AISignal | None = None
-        self.recent_ticks: List[Dict[str, Any]] = []
         self.max_ticks = 100
+        self.recent_ticks: Deque[Dict[str, Any]] = deque(maxlen=self.max_ticks)
+        self.latest_prices: Dict[str, float] = {}
         self.active_connections: List[asyncio.Queue] = []
         self.current_balance = 10000.0
         self.current_regime = "UNKNOWN"
@@ -60,8 +62,8 @@ class GlobalState:
     async def update_tick(self, tick: Dict[str, Any]):
         async with self._lock:
             self.recent_ticks.append(tick)
-            if len(self.recent_ticks) > self.max_ticks:
-                self.recent_ticks.pop(0)
+            if "symbol" in tick and "price" in tick:
+                self.latest_prices[tick["symbol"]] = tick["price"]
 
             # Aggregate into OHLCV for Lightweight Charts (e.g., 1-second candles for visual speed)
             price = tick.get("price", 0.0)
@@ -121,19 +123,16 @@ class GlobalState:
     def get_summary(self) -> Dict[str, Any]:
         """Provides a snapshot for the LLM Copilot."""
         action = self.latest_signal.action if self.latest_signal else "HOLD"
-        last_price = (
-            self.recent_ticks[-1].get("price", 50000.0)
-            if self.recent_ticks
-            else 50000.0
-        )
-        return {
+        summary = {
             "regime": self.current_regime,
             "balance": self.current_balance,
             "recent_action": action,
             "mode": self.run_mode,
-            "last_price": last_price,
             **self.metrics,  # Include metrics in summary for LLM
         }
+        for symbol, price in self.latest_prices.items():
+            summary[f"price_{symbol}"] = price
+        return summary
 
 
 global_state = GlobalState()

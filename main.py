@@ -57,7 +57,7 @@ async def lifespan(app):
     try:
         await engine_task
     except asyncio.CancelledError:
-        pass
+        logger.info("Corax Engine task was cancelled during shutdown.")
 
 
 # Attach the lifespan to the FastAPI app
@@ -79,7 +79,7 @@ async def main():
     try:
         await server.serve()
     except asyncio.CancelledError:
-        pass
+        logger.info("Uvicorn server was cancelled during shutdown.")
 
 
 if __name__ == "__main__":

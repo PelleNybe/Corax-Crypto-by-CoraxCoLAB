@@ -1,0 +1,32 @@
+From 218aff92afc619bfb414083a996b3847dea84138 Mon Sep 17 00:00:00 2001
+From: "google-labs-jules[bot]"
+ <161369871+google-labs-jules[bot]@users.noreply.github.com>
+Date: Tue, 21 Jul 2026 23:11:49 +0000
+Subject: [PATCH] =?UTF-8?q?=F0=9F=94=92=20[security]=20Fix=20overly=20perm?=
+ =?UTF-8?q?issive=20CORS=20wildcard=20fallback?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+🎯 What: Removed the fallback mechanism that assigned '["*"]' to allowed_origins when the settings API_ALLOWED_ORIGINS list was empty.
+⚠️ Risk: If the allowed origins string is misconfigured or empty, it defaults to allowing any origin with credentials. Combined with allow_credentials=True, this could expose the API to cross-origin credentialed requests.
+🛡️ Solution: Removed the if block that overrides empty allowed_origins with '["*"]'. If no origins are configured, it will be empty and safely block all external requests.
+---
+ core/api_server.py | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/core/api_server.py b/core/api_server.py
+index c9ab40a..b304546 100644
+--- a/core/api_server.py
++++ b/core/api_server.py
+@@ -32,8 +32,6 @@ allowed_origins = [
+     for origin in settings.API_ALLOWED_ORIGINS.split(",")
+     if origin.strip()
+ ]
+-if not allowed_origins:
+-    allowed_origins = ["*"]  # Fallback if empty, though default should prevent this
+
+ app.add_middleware(
+     CORSMiddleware,
+--
+2.53.0

@@ -1,3 +1,6 @@
+const apiKeyMeta = document.querySelector('meta[name="api-key"]');
+const apiKey = apiKeyMeta ? apiKeyMeta.content : "";
+
 // --- Three.js Scene Setup ---
 const container = document.getElementById("webgl-container");
 const scene = new THREE.Scene();
@@ -36,36 +39,33 @@ let lastPing = Date.now();
 
 let particleSystem = null;
 let particleCount = 0;
-let pVelocities = [];
+let pVelocities = null;
 let globalVolume = 0;
 
 // --- Initialize Particles ---
 const pGeo = new THREE.BufferGeometry();
 particleCount = 5000;
 const pPos = new Float32Array(particleCount * 3);
-pVelocities = [];
+pVelocities = new Float32Array(particleCount * 3);
 
 for (let i = 0; i < particleCount; i++) {
-    pPos[i * 3] = (Math.random() - 0.5) * 40;
-    pPos[i * 3 + 1] = (Math.random() - 0.5) * 20;
-    pPos[i * 3 + 2] = (Math.random() - 0.5) * 40;
-    pVelocities.push({
-        x: (Math.random() - 0.5) * 0.05,
-        y: (Math.random() - 0.5) * 0.05,
-        z: (Math.random() - 0.5) * 0.05
-    });
+  pPos[i * 3] = (Math.random() - 0.5) * 40;
+  pPos[i * 3 + 1] = (Math.random() - 0.5) * 20;
+  pPos[i * 3 + 2] = (Math.random() - 0.5) * 40;
+  pVelocities[i * 3] = (Math.random() - 0.5) * 0.05;
+  pVelocities[i * 3 + 1] = (Math.random() - 0.5) * 0.05;
+  pVelocities[i * 3 + 2] = (Math.random() - 0.5) * 0.05;
 }
-pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
+pGeo.setAttribute("position", new THREE.BufferAttribute(pPos, 3));
 const pMat = new THREE.PointsMaterial({
-    color: 0x00ffcc,
-    size: 0.1,
-    transparent: true,
-    opacity: 0.6,
-    blending: THREE.AdditiveBlending
+  color: 0x00ffcc,
+  size: 0.1,
+  transparent: true,
+  opacity: 0.6,
+  blending: THREE.AdditiveBlending,
 });
 particleSystem = new THREE.Points(pGeo, pMat);
 scene.add(particleSystem);
-
 
 // --- Regime Color Mapping ---
 const regimeColors = {
@@ -271,7 +271,7 @@ let candleSeries = null;
 if (tvContainer) {
   try {
     chart = LightweightCharts.createChart(tvContainer, chartOptions);
-    candleSeries = chart.addCandleSeries( {
+    candleSeries = chart.addCandleSeries({
       upColor: "#00ffcc",
       downColor: "#ff0055",
       borderDownColor: "#ff0055",
@@ -287,20 +287,51 @@ if (tvContainer) {
 }
 
 // --- Helper Functions ---
+function throttle(func, limit) {
+  let lastFunc;
+  let lastRan;
+  return function (...args) {
+    if (!lastRan) {
+      requestAnimationFrame(() => {
+        func.apply(this, args);
+        lastRan = Date.now();
+      });
+    } else {
+      clearTimeout(lastFunc);
+      lastFunc = setTimeout(
+        () => {
+          if (Date.now() - lastRan >= limit) {
+            requestAnimationFrame(() => {
+              func.apply(this, args);
+              lastRan = Date.now();
+            });
+          }
+        },
+        Math.max(limit - (Date.now() - lastRan), 0),
+      );
+    }
+  };
+}
+
 function updateHUD(data, type) {
   try {
+    // PERFORMANCE OPTIMIZATION: Use textContent over innerText
+    // 💡 What: Replaced innerText with textContent.
+    // 🎯 Why: innerText triggers a reflow (layout calculation) which is expensive, while textContent only updates the text nodes.
+    // 📊 Impact: Significantly reduces layout thrashing and CPU load in the main thread during high-frequency WebSocket updates.
+    // 🔬 Measurement: Observe reduced layout calculation time in Chrome DevTools Performance profile.
     if (type === "synthesis") {
       const el = document.getElementById("val-synthesis");
-      if (el) el.innerText = `[COPILOT] ${data.text}`;
+      if (el) el.textContent = `[COPILOT] ${data.text}`;
     } else if (type === "balance") {
       const balEl = document.getElementById("val-balance");
       if (balEl && data.balance !== undefined) {
-        balEl.innerText = `$${data.balance.toFixed(2)}`;
+        balEl.textContent = `$${data.balance.toFixed(2)}`;
       }
 
       const modeEl = document.getElementById("val-mode");
       if (modeEl && data.mode) {
-        modeEl.innerText = data.mode === "LIVE" ? "LIVE WARNING" : "DRY RUN";
+        modeEl.textContent = data.mode === "LIVE" ? "LIVE WARNING" : "DRY RUN";
         modeEl.className = `mode-indicator mode-${data.mode}`;
       }
     } else if (type === "signal") {
@@ -308,7 +339,7 @@ function updateHUD(data, type) {
 
       const regimeEl = document.getElementById("val-regime");
       if (regimeEl && data.regime) {
-        regimeEl.innerText = data.regime;
+        regimeEl.textContent = data.regime;
         regimeEl.className = `value ${regimeClass}`;
       }
 
@@ -317,14 +348,21 @@ function updateHUD(data, type) {
         targetGridColor.setHex(regimeColors[data.regime] || 0x00ffcc);
       }
     } else if (type === "metric") {
-        if (data.key === "liquidity_velocity") {
-            const vel = parseFloat(data.value);
-            // Flash screen red if circuit breaker triggered (velocity < -50)
-            if (vel < -50.0) {
-                 triggerTradeAlert("SELL"); // Flash red
-                 addLog(`[CRITICAL] LIQUIDITY VELOCITY CIRCUIT BREAKER TRIPPED! (${vel.toFixed(2)})`, "#ff0055");
-            }
+      if (data.key === "liquidity_velocity") {
+        const vel = parseFloat(data.value);
+        // Flash screen red if circuit breaker triggered (velocity < -50)
+        if (vel < -50.0) {
+          triggerTradeAlert("SELL"); // Flash red
+          addLog(
+            `[CRITICAL] LIQUIDITY VELOCITY CIRCUIT BREAKER TRIPPED! (${vel.toFixed(2)})`,
+            "#ff0055",
+          );
+          showToast(
+            `[CRITICAL] CIRCUIT BREAKER TRIPPED! (${vel.toFixed(2)})`,
+            "error",
+          );
         }
+      }
     }
   } catch (e) {
     console.error("updateHUD error:", e);
@@ -335,17 +373,15 @@ function triggerTradeAlert(action) {
   const overlay = document.getElementById("alert-overlay");
   if (!overlay) return;
 
-  overlay.className =
+  const baseClass =
     action === "BUY" ? "flash-buy" : action === "SELL" ? "flash-sell" : "";
-  if (overlay.className) {
-    overlay.style.opacity = "1";
-    overlay.style.transition = "none"; // Instant flash
+  if (baseClass) {
+    overlay.className = baseClass + " flash-active";
 
     // Force reflow
     void overlay.offsetWidth;
 
-    overlay.style.transition = "opacity 1s ease-out";
-    overlay.style.opacity = "0";
+    overlay.className = baseClass + " flash-fade";
   }
 }
 
@@ -353,14 +389,16 @@ function addLog(text, colorHex) {
   try {
     const logPanel = document.getElementById("log-panel");
     if (!logPanel) return;
+
     const entry = document.createElement("div");
     entry.className = "log-entry";
     entry.style.color = colorHex;
     entry.style.borderColor = colorHex;
-    entry.innerText = text;
+    entry.textContent = text;
     logPanel.appendChild(entry);
 
-    if (logPanel.children.length > 8) {
+    // Keep only the last 8 logs to prevent DOM bloat
+    while (logPanel.children.length > 8) {
       logPanel.removeChild(logPanel.firstChild);
     }
   } catch (e) {
@@ -369,7 +407,7 @@ function addLog(text, colorHex) {
 }
 
 // --- Handle Orderbook Depth Visuals ---
-function renderOrderbook(data) {
+const renderOrderbook = throttle(function (data) {
   try {
     const asksContainer = document.getElementById("depth-asks");
     const bidsContainer = document.getElementById("depth-bids");
@@ -378,67 +416,114 @@ function renderOrderbook(data) {
     const asks = data.asks || [];
     const bids = data.bids || [];
 
-    // Render top 5
-    let asksHtml = "";
-    let maxAskVol = Math.max(...asks.slice(0, 5).map((a) => a[1]), 0.001);
-    for (let i = Math.min(asks.length - 1, 4); i >= 0; i--) {
-      const price = asks[i][0];
-      const vol = asks[i][1];
-      const pct = (vol / maxAskVol) * 100;
-      asksHtml += `
-            <div style="position: relative; height: 16px; font-size: 0.75rem; display: flex; justify-content: space-between; align-items: center;">
-                <div style="position: absolute; right: 0; top: 0; height: 100%; width: ${pct}%; background: rgba(255, 0, 85, 0.3); z-index: 0;"></div>
-                <span style="color: #ff0055; z-index: 1;">${price.toFixed(1)}</span>
-                <span style="z-index: 1; opacity: 0.8;">${vol.toFixed(4)}</span>
-            </div>
-        `;
+    // Render top 5 asks
+    let maxAskVol = 0.001;
+    const numAsks = Math.min(asks.length, 5);
+    for (let i = 0; i < numAsks; i++) {
+      if (asks[i][1] > maxAskVol) maxAskVol = asks[i][1];
     }
-    asksContainer.innerHTML = asksHtml;
 
-    let bidsHtml = "";
-    let maxBidVol = Math.max(...bids.slice(0, 5).map((b) => b[1]), 0.001);
-    for (let i = 0; i < Math.min(bids.length, 5); i++) {
+    // PERFORMANCE OPTIMIZATION: Use DocumentFragment for batching DOM updates
+    // 💡 What: Used DocumentFragment to batch DOM inserts instead of appending to DOM directly.
+    // 🎯 Why: Reduces reflows/repaints, making the UI much more responsive during high-frequency orderbook updates.
+    // PERFORMANCE OPTIMIZATION: Element cloning
+    // 💡 What: Used cloneNode(true) instead of createElement in loops.
+    // 🎯 Why: createElement is slower than cloneNode when repeatedly creating the same structure.
+
+    // Create templates once
+    const wrapperTemplate = document.createElement("div");
+    wrapperTemplate.className = "ob-row-wrapper";
+    const bgTemplateAsks = document.createElement("div");
+    bgTemplateAsks.className = "ob-bg-ask-custom";
+    const priceSpanTemplateAsks = document.createElement("span");
+    priceSpanTemplateAsks.className = "ob-text-ask";
+    const volSpanTemplate = document.createElement("span");
+    volSpanTemplate.className = "ob-vol";
+
+    wrapperTemplate.appendChild(bgTemplateAsks);
+    wrapperTemplate.appendChild(priceSpanTemplateAsks);
+    wrapperTemplate.appendChild(volSpanTemplate);
+
+    const asksFragment = document.createDocumentFragment();
+    for (let i = 0; i < numAsks; i++) {
+      const reversedIndex = numAsks - 1 - i;
+      const price = asks[reversedIndex][0];
+      const vol = asks[reversedIndex][1];
+      const pct = (vol / maxAskVol) * 100;
+
+      const clone = wrapperTemplate.cloneNode(true);
+      clone.children[0].style.width = pct + "%";
+      clone.children[1].textContent = price.toFixed(1);
+      clone.children[2].textContent = vol.toFixed(4);
+      asksFragment.appendChild(clone);
+    }
+    asksContainer.textContent = "";
+    asksContainer.appendChild(asksFragment);
+
+    // Render top 5 bids
+    let maxBidVol = 0.001;
+    const numBids = Math.min(bids.length, 5);
+    for (let i = 0; i < numBids; i++) {
+      if (bids[i][1] > maxBidVol) maxBidVol = bids[i][1];
+    }
+
+    const bidsFragment = document.createDocumentFragment();
+    const bgTemplateBids = document.createElement("div");
+    bgTemplateBids.className = "ob-bg-bid-custom";
+    const priceSpanTemplateBids = document.createElement("span");
+    priceSpanTemplateBids.className = "ob-text-bid";
+
+    const wrapperTemplateBids = document.createElement("div");
+    wrapperTemplateBids.className = "ob-row-wrapper";
+    wrapperTemplateBids.appendChild(bgTemplateBids);
+    wrapperTemplateBids.appendChild(priceSpanTemplateBids);
+    wrapperTemplateBids.appendChild(volSpanTemplate.cloneNode(true));
+
+    for (let i = 0; i < numBids; i++) {
       const price = bids[i][0];
       const vol = bids[i][1];
       const pct = (vol / maxBidVol) * 100;
-      bidsHtml += `
-            <div style="position: relative; height: 16px; font-size: 0.75rem; display: flex; justify-content: space-between; align-items: center;">
-                <div style="position: absolute; left: 0; top: 0; height: 100%; width: ${pct}%; background: rgba(0, 255, 204, 0.3); z-index: 0;"></div>
-                <span style="color: #00ffcc; z-index: 1;">${price.toFixed(1)}</span>
-                <span style="z-index: 1; opacity: 0.8;">${vol.toFixed(4)}</span>
-            </div>
-        `;
+
+      const clone = wrapperTemplateBids.cloneNode(true);
+      clone.children[0].style.width = pct + "%";
+      clone.children[1].textContent = price.toFixed(1);
+      clone.children[2].textContent = vol.toFixed(4);
+      bidsFragment.appendChild(clone);
     }
-    bidsContainer.innerHTML = bidsHtml;
+    bidsContainer.textContent = "";
+    bidsContainer.appendChild(bidsFragment);
   } catch (e) {
     console.error("renderOrderbook error:", e);
   }
-}
+}, 50);
 
 // --- WebSocket Connection ---
 const wsUrl = `ws://${window.location.host}/ws/stream`;
 const ws = new WebSocket(wsUrl);
 
 ws.onopen = () => {
-  document.getElementById("connection-status").style.display = "none";
-  document.getElementById("hud").style.display = "flex";
+  ws.send(JSON.stringify({ action: "auth", api_key: apiKey }));
+  document.getElementById("connection-status").classList.add("display-none");
+  document.getElementById("hud").classList.add("display-flex");
   addLog("[SYS] Neural Link Established", "#00ffcc");
   lastPing = Date.now();
 };
 
 ws.onmessage = (event) => {
   const payload = JSON.parse(event.data);
+  const now = Date.now();
+  const latency = now - lastPing;
+  lastPing = now;
 
   // Update Latency and Timestamp
-  const now = Date.now();
-  document.getElementById("val-latency").innerText = `${now - lastPing} ms`;
-  lastPing = now;
+  const latencyEl = document.getElementById("val-latency");
+  if (latencyEl) latencyEl.textContent = `${latency} ms`;
 
   // Format timestamp nicely
   const date = new Date();
   const timeStr = date.toISOString().replace("T", " ").substring(0, 19);
-  document.getElementById("val-last-updated").innerText =
-    `UPDATED: ${timeStr}Z`;
+  const lastUpdatedEl = document.getElementById("val-last-updated");
+  if (lastUpdatedEl) lastUpdatedEl.textContent = `UPDATED: ${timeStr}Z`;
 
   if (payload.type === "balance") {
     updateHUD(payload.data, "balance");
@@ -463,37 +548,68 @@ ws.onmessage = (event) => {
 
     if (asksEl && bidsEl && payload.data.asks && payload.data.bids) {
       // Calculate max volume for depth bar scaling
-      const maxVol = Math.max(
-        ...payload.data.asks.slice(0, 5).map((a) => a[1]),
-        ...payload.data.bids.slice(0, 5).map((b) => b[1]),
-      );
+      let maxVol = 0.001;
+      const wsAsksCount = Math.min(payload.data.asks.length, 5);
+      for (let i = 0; i < wsAsksCount; i++) {
+        if (payload.data.asks[i][1] > maxVol) maxVol = payload.data.asks[i][1];
+      }
+      const wsBidsCount = Math.min(payload.data.bids.length, 5);
+      for (let i = 0; i < wsBidsCount; i++) {
+        if (payload.data.bids[i][1] > maxVol) maxVol = payload.data.bids[i][1];
+      }
 
       // Render top 5 asks (reverse order so lowest is near spread)
-      let asksHtml = "";
       const topAsks = payload.data.asks.slice(0, 5).reverse();
+
+      // PERFORMANCE OPTIMIZATION: Use DocumentFragment for batching DOM updates
+      // 💡 What: Used DocumentFragment to batch DOM inserts instead of appending to DOM directly.
+      // 🎯 Why: Reduces reflows/repaints, making the UI much more responsive during high-frequency orderbook updates.
+      const rowTemplateAsk = document.createElement("div");
+      rowTemplateAsk.className = "ob-row";
+      rowTemplateAsk.appendChild(document.createElement("span"));
+      rowTemplateAsk.appendChild(document.createElement("span"));
+      const bgAsk = document.createElement("div");
+      bgAsk.className = "ob-bg-ask";
+      rowTemplateAsk.appendChild(bgAsk);
+
+      const asksFragment = document.createDocumentFragment();
       topAsks.forEach((ask) => {
         const widthPct = Math.min(100, (ask[1] / maxVol) * 100);
-        asksHtml += `<div class="ob-row">
-                                <span>${ask[0].toFixed(2)}</span>
-                                <span>${ask[1].toFixed(4)}</span>
-                                <div class="ob-bg-ask" style="width: ${widthPct}%"></div>
-                             </div>`;
+        const clone = rowTemplateAsk.cloneNode(true);
+        clone.children[0].textContent = ask[0].toFixed(2);
+        clone.children[1].textContent = ask[1].toFixed(4);
+        clone.children[2].style.width = widthPct + "%";
+        asksFragment.appendChild(clone);
       });
-      asksEl.innerHTML = asksHtml;
+      asksEl.textContent = "";
+      asksEl.appendChild(asksFragment);
 
       // Render top 5 bids
-      let bidsHtml = "";
       const topBids = payload.data.bids.slice(0, 5);
+
+      const rowTemplateBid = document.createElement("div");
+      rowTemplateBid.className = "ob-row";
+      rowTemplateBid.appendChild(document.createElement("span"));
+      rowTemplateBid.appendChild(document.createElement("span"));
+      const bgBid = document.createElement("div");
+      bgBid.className = "ob-bg-bid";
+      rowTemplateBid.appendChild(bgBid);
+
+      const bidsFragment = document.createDocumentFragment();
       topBids.forEach((bid) => {
         const widthPct = Math.min(100, (bid[1] / maxVol) * 100);
-        bidsHtml += `<div class="ob-row">
-                                <span>${bid[0].toFixed(2)}</span>
-                                <span>${bid[1].toFixed(4)}</span>
-                                <div class="ob-bg-bid" style="width: ${widthPct}%"></div>
-                             </div>`;
+        const clone = rowTemplateBid.cloneNode(true);
+        clone.children[0].textContent = bid[0].toFixed(2);
+        clone.children[1].textContent = bid[1].toFixed(4);
+        clone.children[2].style.width = widthPct + "%";
+        bidsFragment.appendChild(clone);
       });
-      bidsEl.innerHTML = bidsHtml;
+      bidsEl.textContent = "";
+      bidsEl.appendChild(bidsFragment);
     }
+
+    // Update L2 depth as well
+    renderOrderbook(payload.data);
   } else if (payload.action === "kline") {
     if (candleSeries) {
       try {
@@ -502,19 +618,10 @@ ws.onmessage = (event) => {
         console.error("CandleSeries update error:", e);
       }
     } else {
-      console.warn("candleSeries not initialized, cannot update kline");
+      console.warn("Received kline but candleSeries is null");
     }
   }
 };
-
-ws.onerror = (error) => {
-  console.error("WebSocket Error:", error);
-  document.getElementById("connection-status").innerText = "LINK SEVERED";
-  document.getElementById("connection-status").style.color = "#ff0055";
-  document.getElementById("connection-status").style.display = "block";
-};
-
-// --- Manual Trading Hooks ---
 function placeManualTrade(side) {
   if (ws.readyState !== WebSocket.OPEN) {
     addLog(`[ERR] WebSocket not connected`, "#ff0055");
@@ -638,60 +745,65 @@ window.addEventListener("mousemove", (event) => {
 });
 
 // --- Animation Loop ---
+// --- Animation Loop ---
 function animate() {
+  // Use requestAnimationFrame at the top for smoother scheduling
+  requestAnimationFrame(animate);
+
   // Resource Management: Pause rendering if tab is inactive
-  if (!document.hidden) {
-    currentGridColor.lerp(targetGridColor, 0.05);
-    gridHelper.material.color = currentGridColor;
-    pointLight.color = currentGridColor;
+  if (document.hidden) return;
 
-    // Also update particle color based on regime
-    if (particleSystem && particleSystem.material) {
-      particleSystem.material.color = currentGridColor;
-    }
+  currentGridColor.lerp(targetGridColor, 0.05);
+  gridHelper.material.color = currentGridColor;
+  pointLight.color = currentGridColor;
 
-    // Particle animation
-    if (particleSystem) {
-      const positions = particleSystem.geometry.attributes.position.array;
-      const speedMult = 1.0 + Math.min(globalVolume * 0.1, 5.0); // Speed scales with volume
-
-      for (let i = 0; i < particleCount; i++) {
-        positions[i * 3] += pVelocities[i].x * speedMult;
-        positions[i * 3 + 1] += pVelocities[i].y * speedMult;
-        positions[i * 3 + 2] += pVelocities[i].z * speedMult;
-
-        // Boundary wrap
-        if (positions[i * 3] > 20) positions[i * 3] = -20;
-        if (positions[i * 3] < -20) positions[i * 3] = 20;
-        if (positions[i * 3 + 1] > 10) positions[i * 3 + 1] = -10;
-        if (positions[i * 3 + 1] < -10) positions[i * 3 + 1] = 10;
-        if (positions[i * 3 + 2] > 20) positions[i * 3 + 2] = -20;
-        if (positions[i * 3 + 2] < -20) positions[i * 3 + 2] = 20;
-      }
-      particleSystem.geometry.attributes.position.needsUpdate = true;
-    }
-
-    // Decay volume effect
-    globalVolume *= 0.99;
-
-    // Optional: Slow camera rotation or pan
-    // scene.rotation.y += 0.0005;
-
-    renderer.render(scene, camera);
+  // Also update particle color based on regime
+  if (particleSystem && particleSystem.material) {
+    particleSystem.material.color = currentGridColor;
   }
 
-  requestAnimationFrame(animate);
+  // Particle animation
+  if (particleSystem) {
+    const positions = particleSystem.geometry.attributes.position.array;
+    const speedMult = 1.0 + Math.min(globalVolume * 0.1, 5.0); // Speed scales with volume
+
+    for (let i = 0; i < particleCount; i++) {
+      positions[i * 3] += pVelocities[i * 3] * speedMult;
+      positions[i * 3 + 1] += pVelocities[i * 3 + 1] * speedMult;
+      positions[i * 3 + 2] += pVelocities[i * 3 + 2] * speedMult;
+
+      // Boundary wrap
+      if (positions[i * 3] > 20) positions[i * 3] = -20;
+      if (positions[i * 3] < -20) positions[i * 3] = 20;
+      if (positions[i * 3 + 1] > 10) positions[i * 3 + 1] = -10;
+      if (positions[i * 3 + 1] < -10) positions[i * 3 + 1] = 10;
+      if (positions[i * 3 + 2] > 20) positions[i * 3 + 2] = -20;
+      if (positions[i * 3 + 2] < -20) positions[i * 3 + 2] = 20;
+    }
+    particleSystem.geometry.attributes.position.needsUpdate = true;
+  }
+
+  // Decay volume effect
+  globalVolume *= 0.99;
+
+  // Optional: Slow camera rotation or pan
+  // scene.rotation.y += 0.0005;
+
+  renderer.render(scene, camera);
 }
 
-// Debounce resize
-let resizeTimeout;
+// Throttle resize
+let resizeTicking = false;
 window.addEventListener("resize", () => {
-  clearTimeout(resizeTimeout);
-  resizeTimeout = setTimeout(() => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-  }, 100);
+  if (!resizeTicking) {
+    requestAnimationFrame(() => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      resizeTicking = false;
+    });
+    resizeTicking = true;
+  }
 });
 
 animate();
@@ -700,20 +812,20 @@ let viewMode = "CITY"; // 'CITY' or 'HEATMAP'
 
 document.getElementById("btn-toggle-view")?.addEventListener("click", () => {
   viewMode = viewMode === "CITY" ? "HEATMAP" : "CITY";
-  document.getElementById("btn-toggle-view").innerText =
+  document.getElementById("btn-toggle-view").textContent =
     `TOGGLE VIEW: ${viewMode}`;
   candleEngine.updateMeshes(); // Force redraw
 });
 
 // --- Admin & Settings API Hooks ---
 
-const apiUrl = `http://${window.location.hostname}:8000/api/v1`;
+const apiUrl = `http://${window.location.host}/api/v1`;
 
 async function controlEngine(action) {
   try {
     const response = await fetch(`${apiUrl}/engine/control`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
       body: JSON.stringify({ action: action }),
     });
     const data = await response.json();
@@ -729,7 +841,7 @@ async function updatePortfolio(balance) {
   try {
     const response = await fetch(`${apiUrl}/portfolio`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
       body: JSON.stringify({ balance: parseFloat(balance) }),
     });
     const data = await response.json();
@@ -745,7 +857,7 @@ async function setStrategy(strategyName) {
   try {
     const response = await fetch(`${apiUrl}/strategy`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
       body: JSON.stringify({ strategy: strategyName }),
     });
     const data = await response.json();
@@ -761,7 +873,7 @@ async function updateSettings(risk, dd) {
   try {
     const response = await fetch(`${apiUrl}/settings`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
       body: JSON.stringify({
         MAX_RISK_PER_TRADE_PCT: parseFloat(risk),
         DAILY_DRAWDOWN_LIMIT_PCT: parseFloat(dd),
@@ -816,3 +928,138 @@ document
       console.error("Update settings error:", e);
     }
   });
+
+// --- VISUAL STRATEGY BUILDER (LiteGraph) ---
+let graph = null;
+let canvas = null;
+let graphInitialized = false;
+
+function initLiteGraph() {
+  if (graphInitialized || !document.getElementById("strategy-canvas")) return;
+
+  graph = new LGraph();
+  canvas = new LGraphCanvas("#strategy-canvas", graph);
+
+  // Custom Node: Price Input
+  function PriceNode() {
+    this.addOutput("Price", "number");
+    this.title = "Market Price";
+    this.color = "#333";
+    this.bgcolor = "#111";
+  }
+  PriceNode.title = "Input / Market Price";
+  LiteGraph.registerNodeType("input/price", PriceNode);
+
+  // Custom Node: SMA
+  function SmaNode() {
+    this.addInput("Input", "number");
+    this.addOutput("SMA", "number");
+    this.addProperty("period", 14);
+    this.widget = this.addWidget("number", "Period", 14, "period");
+    this.title = "SMA";
+    this.color = "#0055ff";
+  }
+  SmaNode.title = "Math / SMA";
+  LiteGraph.registerNodeType("math/sma", SmaNode);
+
+  // Custom Node: Compare
+  function CompareNode() {
+    this.addInput("A", "number");
+    this.addInput("B", "number");
+    this.addOutput("Trigger", "boolean");
+    this.addProperty("op", ">");
+    this.addWidget("combo", "Operator", ">", "op", {
+      values: [">", "<", "==", ">=", "<="],
+    });
+    this.title = "Compare (Cross)";
+    this.color = "#ffaa00";
+  }
+  CompareNode.title = "Logic / Compare";
+  LiteGraph.registerNodeType("logic/compare", CompareNode);
+
+  // Custom Node: Signal Output
+  function SignalNode() {
+    this.addInput("Trigger", "boolean");
+    this.addProperty("signal_type", "buy");
+    this.addWidget("combo", "Signal", "buy", "signal_type", {
+      values: ["buy", "sell"],
+    });
+    this.title = "Strategy Output";
+    this.color = "#00ffcc";
+  }
+  SignalNode.title = "Output / Signal";
+  LiteGraph.registerNodeType("output/signal", SignalNode);
+
+  // Add default nodes
+  var node_price = LiteGraph.createNode("input/price");
+  node_price.pos = [100, 200];
+  graph.add(node_price);
+
+  var node_sma = LiteGraph.createNode("math/sma");
+  node_sma.pos = [300, 200];
+  graph.add(node_sma);
+
+  var node_comp = LiteGraph.createNode("logic/compare");
+  node_comp.pos = [500, 200];
+  graph.add(node_comp);
+
+  var node_out = LiteGraph.createNode("output/signal");
+  node_out.pos = [700, 200];
+  graph.add(node_out);
+
+  // Connect them
+  node_price.connect(0, node_sma, 0);
+  node_price.connect(0, node_comp, 0);
+  node_sma.connect(0, node_comp, 1);
+  node_comp.connect(0, node_out, 0);
+
+  graph.start();
+  graphInitialized = true;
+}
+
+document
+  .getElementById("btn-save-strategy")
+  ?.addEventListener("click", async () => {
+    if (!graph) return;
+    const data = graph.serialize();
+    try {
+      const res = await fetch("/api/v1/strategy/visual", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
+        body: JSON.stringify(data),
+      });
+      const result = await res.json();
+      if (result.status === "success") {
+        addLog("Visual Strategy Saved Successfully", "SUCCESS");
+
+        // Auto switch engine to use it
+        await fetch("/api/v1/settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
+          body: JSON.stringify({ ACTIVE_STRATEGY: "VisualStrategy" }),
+        });
+        addLog("Engine swapped to VisualStrategy", "SUCCESS");
+      } else {
+        addLog("Failed to save Visual Strategy", "ERROR");
+      }
+    } catch (e) {
+      addLog("Network error saving strategy", "ERROR");
+    }
+  });
+function showToast(message, type = "info") {
+  const container = document.getElementById("toast-container");
+  if (!container) return;
+
+  const toast = document.createElement("div");
+  toast.className = "toast " + type;
+  toast.textContent = message;
+
+  container.appendChild(toast);
+
+  // Automatically remove after animation completes (0.3s in + 4.5s wait + 0.5s out = 5.3s)
+  setTimeout(() => {
+    if (container.contains(toast)) {
+      container.removeChild(toast);
+    }
+  }, 5500);
+}

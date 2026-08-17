@@ -1,7 +1,9 @@
 import time
+import asyncio
 from typing import Dict
+from schemas.orders import OrderContext
 
-import requests
+import aiohttp
 from loguru import logger
 
 from core.config import settings
@@ -53,95 +55,107 @@ class ArcLedger:
         )
 
         # Synka saldo direkt vid start
-        self._sync_balance(force=True)
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._sync_balance(force=True))
+        except RuntimeError:
+            self._sync_balance_sync(force=True)
 
-    def _sync_balance(self, force: bool = False):
-        """Fetch real USDC balance from Circle Programmable Wallet"""
+    def _process_balance_response(self, data: dict):
+        token_balances = data.get("tokenBalances", [])
+
+        found_usdc = False
+        valid_symbols = {"USDC", "USD"}
+        for b in token_balances:
+            try:
+                if b["token"]["symbol"] in valid_symbols:
+                    self.balance = float(b["amount"])
+                    found_usdc = True
+                    break
+            except KeyError:
+                continue
+
+        if found_usdc:
+            logger.success(f"✅ ArcLedger synced. Balance: {self.balance:,.2f} USDC")
+        else:
+            logger.warning("Synced with Circle, but no USDC balance found.")
+            self.balance = 0.0
+
+    def _sync_balance_sync(self, force: bool = False):
+        if not self.api_key or not self.wallet_id:
+            logger.warning("Circle credentials missing i ArcLedger.")
+            return
+
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._sync_balance(force))
+        except RuntimeError:
+            asyncio.run(self._sync_balance(force))
+
+    async def _sync_balance(self, force: bool = False):
         if not self.api_key or not self.wallet_id:
             logger.warning("Circle credentials missing i ArcLedger.")
             return
 
         now = time.monotonic()
         if not force and (now - self._last_sync_time) < self._sync_cooldown:
-            return  # Skip sync, use cached balance
+            return
 
         self._last_sync_time = now
 
         try:
-            # Specifically calls the balances endpoint for W3S Developer Controlled Wallets
             url = f"{self.api_base}/wallets/{self.wallet_id}/balances"
-
-            # Vi lägger till User-Agent för att undvika 403-blockeringar i Docker
             custom_headers = self.headers.copy()
             custom_headers["User-Agent"] = "CoraxCryptoAgent/1.0"
 
-            response = requests.get(url, headers=custom_headers, timeout=5)
-
-            if response.status_code == 200:
-                data = response.json().get("data", {})
-                token_balances = data.get("tokenBalances", [])
-
-                found_usdc = False
-                # Optimized: hoisted set for faster IN lookups (~26% speedup)
-                valid_symbols = {"USDC", "USD"}
-                for b in token_balances:
-                    # Circle Testnet/Arc använder ofta 'USDC' som token-symbol
-                    try:
-                        if b["token"]["symbol"] in valid_symbols:
-                            self.balance = float(b["amount"])
-                            found_usdc = True
-                            break
-                    except KeyError:
-                        continue
-
-                if found_usdc:
-                    logger.success(
-                        f"✅ ArcLedger synced. Balance: {self.balance:,.2f} USDC"
-                    )
-                else:
-                    logger.warning("Synced with Circle, but no USDC balance found.")
-                    self.balance = 0.0
-            else:
-                logger.error(
-                    f"❌ Failed to sync Circle balance: {response.status_code} - {response.text}"
-                )
-
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Network error syncing balance: {e}")
+            async with aiohttp.ClientSession(headers=custom_headers) as session:
+                async with session.get(url, timeout=5) as response:
+                    if response.status == 200:
+                        json_resp = await response.json()
+                        data = json_resp.get("data", {})
+                        self._process_balance_response(data)
+                    else:
+                        text = await response.text()
+                        logger.error(
+                            f"❌ Failed to sync Circle balance: {response.status} - {text}"
+                        )
         except Exception as e:
             logger.error(f"Error syncing balance: {e}")
 
     def reset_ledger(self):
         """Not supported for live ArcLedger."""
-        pass
+        raise NotImplementedError("reset_ledger is not supported for live ArcLedger.")
 
     async def execute_virtual_order(
         self,
-        symbol: str,
-        side: str,
-        order_type: str,
-        amount: float,
-        current_price: float = None,
+        context: OrderContext,
     ):
         """
+
         Interfacet som anropas av OrderManager.
         I ArcLedger utför vi faktiska on-chain beräkningar här.
         """
         # Uppdatera saldo innan vi kollar täckning (med cooldown)
-        self._sync_balance()
+        await self._sync_balance()
 
-        if not current_price:
+        if not context.current_price:
             from core.state import global_state
 
             summary = global_state.get_summary()
-            current_price = summary.get("last_price", 0.0)
+            context.current_price = summary.get(f"price_{context.symbol}", 0.0)
+
+        if context.current_price <= 0:
+            logger.warning(
+                f"🚨 INVALID PRICE: Cannot execute order with price {context.current_price}"
+            )
+            return False
 
         slippage_pct = 0.001
-        exec_price = current_price
+        exec_price = context.current_price
 
-        if side.lower() == "buy":
-            exec_price = current_price * (1 + slippage_pct)
-            trade_cost = amount * exec_price
+        if context.side.lower() == "buy":
+            exec_price = context.current_price * (1 + slippage_pct)
+            trade_cost = context.amount * exec_price
 
             if self.balance < trade_cost:
                 logger.warning(
@@ -152,32 +166,39 @@ class ArcLedger:
             # Här skulle vi i framtiden kunna trigga en faktisk transfer till en börs via Circle API
             # För tillfället simulerar vi avräkningen mot vårt Arc-saldo
             self.balance -= trade_cost
-            self.positions[symbol] = self.positions.get(symbol, 0.0) + amount
+            self.positions[context.symbol] = (
+                self.positions.get(context.symbol, 0.0) + context.amount
+            )
             logger.info(
-                f"🟢 ARC BUY EXEC: {amount} {symbol} (Cost: {trade_cost:.2f} USDC)"
+                f"🟢 ARC BUY EXEC: {context.amount} {context.symbol} (Cost: {trade_cost:.2f} USDC)"
             )
 
-        elif side.lower() == "sell":
-            current_pos = self.positions.get(symbol, 0.0)
-            if current_pos < amount:
+        elif context.side.lower() == "sell":
+            current_pos = self.positions.get(context.symbol, 0.0)
+            if current_pos < context.amount:
                 logger.warning(
-                    f"🚨 INSUFFICIENT ASSET: Trying to sell {amount}, hold {current_pos}"
+                    f"🚨 INSUFFICIENT ASSET: Trying to sell {context.amount}, hold {current_pos}"
                 )
                 return False
 
-            exec_price = current_price * (1 - slippage_pct)
-            gain = amount * exec_price
+            exec_price = context.current_price * (1 - slippage_pct)
+            gain = context.amount * exec_price
 
             self.balance += gain
-            self.positions[symbol] -= amount
-            logger.info(f"🔴 ARC SELL EXEC: {amount} {symbol} (Gain: {gain:.2f} USDC)")
+            self.positions[context.symbol] -= context.amount
+            logger.info(
+                f"🔴 ARC SELL EXEC: {context.amount} {context.symbol} (Gain: {gain:.2f} USDC)"
+            )
+        else:
+            logger.warning(f"🚨 INVALID ORDER SIDE: {context.side}")
+            return False
 
         self.trade_history.append(
             {
                 "timestamp": time.time(),
-                "symbol": symbol,
-                "side": side,
-                "amount": amount,
+                "symbol": context.symbol,
+                "side": context.side,
+                "amount": context.amount,
                 "price": exec_price,
                 "balance_after": self.balance,
             }
@@ -186,5 +207,5 @@ class ArcLedger:
 
     # Hjälpmetod för att tvinga en uppdatering utifrån
     async def refresh_balance(self):
-        self._sync_balance(force=True)
+        await self._sync_balance(force=True)
         return self.balance

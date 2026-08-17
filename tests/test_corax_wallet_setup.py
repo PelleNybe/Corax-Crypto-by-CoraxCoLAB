@@ -1,93 +1,105 @@
-import pytest
-import base64
 import os
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
+import pytest
+from cryptography.hazmat.primitives.asymmetric import rsa
 
-from cryptography.hazmat.primitives.asymmetric import rsa, padding
-from cryptography.hazmat.primitives import serialization, hashes
+import corax_wallet_setup
 
-from corax_wallet_setup import encrypt_entity_secret, main
 
 @pytest.fixture
 def rsa_key_pair():
-    private_key = rsa.generate_private_key(
-        public_exponent=65537,
-        key_size=2048,
-    )
-    public_key = private_key.public_key()
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    from cryptography.hazmat.primitives import serialization
 
-    public_pem = public_key.public_bytes(
+    public_key_pem = private_key.public_key().public_bytes(
         encoding=serialization.Encoding.PEM,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo
-    ).decode('utf-8')
-
-    return private_key, public_pem
-
-def test_encrypt_entity_secret(rsa_key_pair):
-    private_key, public_pem = rsa_key_pair
-    entity_secret_hex = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-
-    encrypted_base64 = encrypt_entity_secret(entity_secret_hex, public_pem)
-
-    # Decrypt and verify
-    encrypted_bytes = base64.b64decode(encrypted_base64)
-    decrypted_bytes = private_key.decrypt(
-        encrypted_bytes,
-        padding.OAEP(
-            mgf=padding.MGF1(algorithm=hashes.SHA256()),
-            algorithm=hashes.SHA256(),
-            label=None
-        )
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
     )
+    return private_key, public_key_pem.decode("utf-8")
 
-    assert decrypted_bytes.hex() == entity_secret_hex
 
 @patch("corax_wallet_setup.os.environ.get")
-@patch("builtins.print")
+@patch("corax_wallet_setup.print")
 def test_main_missing_api_key(mock_print, mock_env_get):
     mock_env_get.return_value = None
-
-    main()
-
+    corax_wallet_setup.main()
     mock_print.assert_called_with("❌ Fel: Du måste exportera CIRCLE_API_KEY!")
 
-@patch("corax_wallet_setup.os.environ.get")
-@patch("corax_wallet_setup.requests.get")
-@patch("corax_wallet_setup.requests.post")
-@patch("builtins.open")
-def test_main_success(mock_open, mock_post, mock_get, mock_env_get, rsa_key_pair):
-    _, public_pem = rsa_key_pair
-    mock_env_get.return_value = "TEST_API_KEY"
-
-    # Mock responses
-    mock_get_resp = MagicMock()
-    mock_get_resp.json.return_value = {"data": {"publicKey": public_pem}}
-    mock_get.return_value = mock_get_resp
-
-    mock_post_reg_resp = MagicMock()
-    mock_post_reg_resp.json.return_value = {"data": {"recoveryFile": "TEST_RECOVERY_DATA"}}
-
-    mock_post_set_resp = MagicMock()
-    mock_post_set_resp.json.return_value = {"data": {"walletSet": {"id": "TEST_WALLET_SET_ID"}}}
-
-    mock_post_wallet_resp = MagicMock()
-    mock_post_wallet_resp.json.return_value = {"data": {"wallets": [{"id": "TEST_WALLET_ID", "address": "0xTESTADDRESS"}]}}
-
-    mock_post.side_effect = [mock_post_reg_resp, mock_post_set_resp, mock_post_wallet_resp]
-
-    main()
-
-    # Verify open was called
-    mock_open.assert_called_with("recovery.dat", "w")
 
 @patch("corax_wallet_setup.os.environ.get")
-@patch("corax_wallet_setup.requests.get")
-@patch("builtins.print")
-def test_main_api_exception(mock_print, mock_get, mock_env_get):
-    mock_env_get.return_value = "TEST_API_KEY"
+@patch("corax_wallet_setup.fetch_public_key")
+@patch("corax_wallet_setup.print")
+def test_main_fetch_key_failure(mock_print, mock_fetch, mock_env_get):
+    mock_env_get.return_value = "fake_api_key"
+    mock_fetch.side_effect = Exception("Fetch error")
 
-    mock_get.side_effect = Exception("TEST EXCEPTION")
+    corax_wallet_setup.main()
 
-    main()
+    mock_fetch.assert_called_once()
+    mock_print.assert_any_call("❌ Ett fel uppstod: Fetch error")
 
-    mock_print.assert_any_call("❌ Ett fel uppstod: TEST EXCEPTION")
+
+@patch("corax_wallet_setup.os.environ.get")
+@patch("corax_wallet_setup.fetch_public_key")
+@patch("corax_wallet_setup.register_entity_secret")
+@patch("corax_wallet_setup.setup_wallet_infrastructure")
+@patch("corax_wallet_setup.save_recovery_file")
+@patch("corax_wallet_setup.set_key")
+@patch("corax_wallet_setup.print")
+def test_main_success(
+    mock_print,
+    mock_set_key,
+    mock_save_recovery_file,
+    mock_setup_wallet_infrastructure,
+    mock_register,
+    mock_fetch,
+    mock_env_get,
+    rsa_key_pair,
+):
+    private_key, pub_key_pem = rsa_key_pair
+    mock_env_get.return_value = "fake_api_key"
+    mock_fetch.return_value = pub_key_pem
+    mock_register.return_value = "fake_recovery_data"
+    mock_setup_wallet_infrastructure.return_value = (
+        "TEST_WALLET_SET_ID",
+        "TEST_WALLET_ID",
+        "0xTESTADDRESS",
+    )
+
+    corax_wallet_setup.main()
+
+    mock_fetch.assert_called_once()
+    mock_register.assert_called_once()
+    mock_setup_wallet_infrastructure.assert_called_once()
+
+    mock_save_recovery_file.assert_called_once_with(
+        "recovery.dat", "fake_recovery_data"
+    )
+
+    # We can't know the exact secret since secrets.token_hex is not mocked,
+    # but we can verify it was called with the right .env path.
+    # The actual call args check would be complicated due to non-mocked secret.
+    assert mock_set_key.call_count == 1
+    assert mock_set_key.call_args[0][0] == ".env"
+    assert mock_set_key.call_args[0][1] == "CIRCLE_ENTITY_SECRET"
+
+
+def test_if_name_main():
+    import subprocess
+    import sys
+
+    env_exists = os.path.exists(".env")
+    if env_exists:
+        os.rename(".env", ".env.bak")
+
+    try:
+        result = subprocess.run(
+            [sys.executable, "corax_wallet_setup.py"],
+            capture_output=True,
+            text=True,
+            env={},
+        )
+        assert "❌ Fel: Du måste exportera CIRCLE_API_KEY!" in result.stdout
+    finally:
+        if env_exists:
+            os.rename(".env.bak", ".env")

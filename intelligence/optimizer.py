@@ -196,12 +196,12 @@ class CoraxOptimizer:
             logger.info(f"Generation {generation + 1}/{self.generations}")
 
             # Evaluate fitness for all individuals (can be parallelized)
-            fitness_scores = []
-            for individual in population:
-                fitness = await self._evaluate_fitness(
-                    strategy_class, individual, data_path
-                )
-                fitness_scores.append((individual, fitness))
+            tasks = [
+                self._evaluate_fitness(strategy_class, individual, data_path)
+                for individual in population
+            ]
+            results = await asyncio.gather(*tasks)
+            fitness_scores = list(zip(population, results))
 
             # Sort by fitness descending
             fitness_scores.sort(key=lambda x: x[1], reverse=True)

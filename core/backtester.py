@@ -172,7 +172,7 @@ class CoraxBacktester:
 
 if __name__ == "__main__":
     os.makedirs("data/ticks", exist_ok=True)
-    test_file = "data/ticks/mock_history.parquet"
+    test_file = "data/market_ticks.parquet"
     if not os.path.exists(test_file):
         pl.DataFrame(
             {

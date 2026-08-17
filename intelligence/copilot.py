@@ -1,5 +1,5 @@
-import asyncio
-import re
+import json
+import aiohttp
 from loguru import logger
 from typing import Dict, Any, Tuple, Optional
 from core.config import settings
@@ -17,6 +17,7 @@ class CoraxCopilot:
         self.api_key = settings.LLM_API_KEY
         self._cached_synthesis: Optional[str] = None
         self._last_state_hash: Optional[str] = None
+        self.api_url = "https://api.openai.com/v1/chat/completions"
 
     def get_tool_schemas(self):
         """Returns the JSON schema for tools available to the LLM."""
@@ -36,7 +37,6 @@ class CoraxCopilot:
         Queries an LLM API to generate a human-readable Market Synthesis.
         """
         regime = state_summary.get("regime", "UNKNOWN")
-
         recent_action = state_summary.get("recent_action", "HOLD")
 
         # Create a simple hash to check if state changed significantly
@@ -45,68 +45,64 @@ class CoraxCopilot:
         if self._last_state_hash == state_hash and self._cached_synthesis:
             return self._cached_synthesis
 
-        await asyncio.sleep(1.5)
+        logger.debug("Generating synthesis via LLM Copilot...")
 
-        logger.debug("LLM Prompt generated.")
+        system_prompt = (
+            "You are Corax Copilot, an AI assistant for a high-frequency trading engine. "
+            "Given the current market regime and recent actions, provide a brief, one-sentence "
+            "market synthesis for the human operator."
+        )
 
+        user_prompt = f"Current Regime: {regime}\nRecent Action: {recent_action}"
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                headers = {
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                }
+                payload = {
+                    "model": "gpt-4o-mini",
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    "max_tokens": 60,
+                    "temperature": 0.7,
+                }
+
+                async with session.post(
+                    self.api_url, headers=headers, json=payload, timeout=5
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        synthesis = data["choices"][0]["message"]["content"].strip()
+                    else:
+                        logger.warning(
+                            f"LLM API returned status {response.status}. Falling back to default synthesis."
+                        )
+                        synthesis = self._get_fallback_synthesis(regime)
+        except Exception as e:
+            logger.error(f"Failed to generate LLM synthesis: {e}. Falling back.")
+            synthesis = self._get_fallback_synthesis(regime)
+
+        self._cached_synthesis = synthesis
+        self._last_state_hash = state_hash
+        return synthesis
+
+    def _get_fallback_synthesis(self, regime: str) -> str:
         regime_messages = {
             "TRENDING_UP": "Copilot: Bullish momentum confirmed. Order flow supports continuation.",
             "VOLATILE_CRASH": "Copilot: Extreme downside volatility. Risk-off mode activated.",
             "RANGING": "Copilot: Market consolidating. Avoiding chop until volume expands.",
         }
 
-        synthesis = regime_messages.get(
+        return regime_messages.get(
             regime, "Copilot: Analyzing micro-structure for clear direction..."
         )
 
-        self._cached_synthesis = synthesis
-        self._last_state_hash = state_hash
-        return synthesis
-
-    def _resolve_chain(self, chain_match: Optional[re.Match], default: str) -> str:
-        """Helper to resolve chain names from regex matches."""
-        if not chain_match:
-            return default
-
-        src = chain_match.group(1).lower()
-        chain_mapping = {
-            "optimism": "optimism_sepolia",
-            "avalanche": "avalanche_fuji",
-            "arbitrum": "arbitrum_sepolia",
-            "solana": "solana_devnet",
-            "base": "base_sepolia",
-            "polygon": "polygon_amoy",
-            "ethereum": "ethereum_sepolia",
-        }
-
-        for key, value in chain_mapping.items():
-            if key in src:
-                return value
-
-        return default
-
-    def _extract_cctp_parameters(self, msg_lower: str) -> Dict[str, Any]:
-        """Extracts CCTP transfer parameters from the message."""
-        # Simple heuristic regex for extraction (simulating an LLM tool call parameter extraction)
-        amount_match = re.search(r"(\d+(\.\d+)?)", msg_lower)
-        amount = float(amount_match.group(1)) if amount_match else 100.0
-
-        source_chain_match = re.search(r"from\s+(\w+)", msg_lower)
-        source_chain = self._resolve_chain(source_chain_match, "ethereum_sepolia")
-
-        # We assume a fixed target chain logic for the dummy regex, but in a real LLM we'd parse "to [chain]"
-        target_chain_match = re.search(r"to\s+(\w+)", msg_lower)
-        target_chain = self._resolve_chain(target_chain_match, "arbitrum_sepolia")
-
-        return {
-            "amount": amount,
-            "source_chain": source_chain,
-            "target_chain": target_chain,
-            "destination_address": "0x1234567890abcdef1234567890abcdef12345678",
-        }
-
-    def _match_intent(self, msg_lower: str) -> str:
-        """Helper to match the intent from a lowercased message."""
+    def _match_intent_fallback(self, msg_lower: str) -> str:
+        """Helper to match the intent from a lowercased message if LLM fails."""
         intent_mapping = {
             "STATUS": ["status", "how are we doing", "summary", "update"],
             "PAUSE": ["pause", "stop trading", "halt"],
@@ -131,19 +127,67 @@ class CoraxCopilot:
         """
         logger.debug(f"Parsing intent for: '{user_message}'")
 
-        # Simulate an API call to an LLM with tool calling enabled
-        await asyncio.sleep(1.0)
+        system_prompt = (
+            "You are Corax Copilot, an AI command center for an algorithmic trading engine. "
+            "Analyze the user's message and determine the correct intent. "
+            "Available intents are: STATUS, PAUSE, RESUME, KILL_SWITCH, CCTP_TRANSFER, UNKNOWN. "
+            "If the user wants to bridge or move USDC between chains, you MUST invoke the `execute_cctp_transfer` tool. "
+            "Otherwise, respond with exactly ONE of the intent strings above and nothing else."
+        )
 
+        try:
+            async with aiohttp.ClientSession() as session:
+                headers = {
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                }
+                payload = {
+                    "model": "gpt-4o-mini",
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_message},
+                    ],
+                    "tools": self.get_tool_schemas(),
+                    "tool_choice": "auto",
+                    "temperature": 0.0,
+                }
+
+                async with session.post(
+                    self.api_url, headers=headers, json=payload, timeout=5
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        message = data["choices"][0]["message"]
+
+                        if message.get("tool_calls"):
+                            tool_call = message["tool_calls"][0]
+                            if tool_call["function"]["name"] == "execute_cctp_transfer":
+                                tool_args = json.loads(
+                                    tool_call["function"]["arguments"]
+                                )
+                                logger.info(
+                                    "Copilot identified CCTP Transfer intent from LLM tool call."
+                                )
+                                return "CCTP_TRANSFER", tool_args
+
+                        content = message.get("content", "").strip().upper()
+                        valid_intents = [
+                            "STATUS",
+                            "PAUSE",
+                            "RESUME",
+                            "KILL_SWITCH",
+                            "UNKNOWN",
+                        ]
+                        if content in valid_intents:
+                            return content, None
+
+                    else:
+                        logger.warning(
+                            f"LLM intent parsing failed with status {response.status}. Using fallback."
+                        )
+        except Exception as e:
+            logger.error(f"Error parsing intent via LLM: {e}. Using fallback.")
+
+        # Fallback to local heuristic matching
         msg_lower = user_message.lower()
-
-        # Dummy NLP / Tool Calling Logic
-        if "bridge" in msg_lower or "cctp" in msg_lower or "move usdc" in msg_lower:
-            logger.info(
-                "Copilot identified CCTP Transfer intent. Extracting parameters..."
-            )
-
-            tool_args = self._extract_cctp_parameters(msg_lower)
-            logger.debug(f"Extracted tool args: {tool_args}")
-            return "CCTP_TRANSFER", tool_args
-
-        return self._match_intent(msg_lower), None
+        return self._match_intent_fallback(msg_lower), None
