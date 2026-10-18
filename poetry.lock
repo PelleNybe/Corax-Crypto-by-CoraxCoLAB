@@ -3219,43 +3219,66 @@ testing = ["coverage", "pytest", "pytest-benchmark"]
 
 [[package]]
 name = "polars"
-version = "0.20.31"
+version = "1.44.1"
 description = "Blazingly fast DataFrame library"
 optional = false
-python-versions = ">=3.8"
+python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "polars-0.20.31-cp38-abi3-macosx_10_12_x86_64.whl", hash = "sha256:86454ade5ed302bbf87f145cfcb1b14f7a5765a9440e448659e1f3dba6ac4e79"},
-    {file = "polars-0.20.31-cp38-abi3-macosx_11_0_arm64.whl", hash = "sha256:67f2fe842262b7e1b9371edad21b760f6734d28b74c78dda88dff1bf031b9499"},
-    {file = "polars-0.20.31-cp38-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:24b82441f93409e0e8abd6f427b029db102f02b8de328cee9a680f84b84e3736"},
-    {file = "polars-0.20.31-cp38-abi3-manylinux_2_24_aarch64.whl", hash = "sha256:87f43bce4d41abf8c8c5658d881e4b8378e5c61010a696bfea8b4106b908e916"},
-    {file = "polars-0.20.31-cp38-abi3-win_amd64.whl", hash = "sha256:2d7567c9fd9d3b9aa93387ca9880d9e8f7acea3c0a0555c03d8c0c2f0715d43c"},
-    {file = "polars-0.20.31.tar.gz", hash = "sha256:00f62dec6bf43a4e2a5db58b99bf0e79699fe761c80ae665868eaea5168f3bbb"},
+    {file = "polars-1.44.1-py3-none-any.whl", hash = "sha256:1fa62fc1c88fba77a68b28291b5aabdd69e5f38b34e59721a064ae3169b59bb5"},
+    {file = "polars-1.44.1.tar.gz", hash = "sha256:ef3c89e9ebbbe8eb343c06873f1945683f8b6f97a1bdf001c60551c6c5e3cda1"},
 ]
 
+[package.dependencies]
+polars-runtime-32 = "1.44.1"
+
 [package.extras]
-adbc = ["adbc-driver-manager", "adbc-driver-sqlite"]
-all = ["polars[adbc,async,cloudpickle,connectorx,deltalake,fastexcel,fsspec,gevent,iceberg,numpy,pandas,plot,pyarrow,pydantic,sqlalchemy,timezone,xlsx2csv,xlsxwriter]"]
-async = ["nest-asyncio"]
+adbc = ["adbc-driver-manager[dbapi]", "adbc-driver-sqlite[dbapi]"]
+all = ["polars[async,cloudpickle,database,deltalake,excel,fsspec,graph,iceberg,numpy,pandas,plot,pyarrow,pydantic,style,timezone]"]
+async = ["gevent"]
+calamine = ["fastexcel (>=0.9)"]
 cloudpickle = ["cloudpickle"]
 connectorx = ["connectorx (>=0.3.2)"]
-deltalake = ["deltalake (>=0.15.0)"]
-fastexcel = ["fastexcel (>=0.9)"]
+database = ["polars[adbc,connectorx,sqlalchemy]"]
+deltalake = ["deltalake (>=1.0.0,!=1.5.*)"]
+excel = ["polars[calamine,openpyxl,xlsx2csv,xlsxwriter]"]
 fsspec = ["fsspec"]
-gevent = ["gevent"]
-iceberg = ["pyiceberg (>=0.5.0)"]
-matplotlib = ["matplotlib"]
+gpu = ["cudf-polars-cu12"]
+graph = ["matplotlib"]
+iceberg = ["pyiceberg (>=0.9.0)"]
 numpy = ["numpy (>=1.16.0)"]
 openpyxl = ["openpyxl (>=3.0.0)"]
-pandas = ["pandas", "pyarrow (>=7.0.0)"]
-plot = ["hvplot (>=0.9.1)"]
+pandas = ["pandas", "polars[pyarrow]"]
+plot = ["altair (>=5.4.0)"]
+polars-cloud = ["polars_cloud (>=0.9.0)"]
 pyarrow = ["pyarrow (>=7.0.0)"]
 pydantic = ["pydantic"]
-pyxlsb = ["pyxlsb (>=1.0)"]
-sqlalchemy = ["pandas", "sqlalchemy"]
-timezone = ["backports-zoneinfo ; python_version < \"3.9\"", "tzdata ; platform_system == \"Windows\""]
+rt64 = ["polars-runtime-64 (==1.44.1)"]
+rtcompat = ["polars-runtime-compat (==1.44.1)"]
+sqlalchemy = ["polars[pandas]", "sqlalchemy"]
+style = ["great-tables (>=0.8.0)"]
+timezone = ["tzdata ; platform_system == \"Windows\""]
 xlsx2csv = ["xlsx2csv (>=0.8.0)"]
 xlsxwriter = ["xlsxwriter"]
+
+[[package]]
+name = "polars-runtime-32"
+version = "1.44.1"
+description = "Blazingly fast DataFrame library"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = [
+    {file = "polars_runtime_32-1.44.1-cp310-abi3-macosx_10_12_x86_64.whl", hash = "sha256:1dfccb2b52aa50468a7d28e3e61c8338a13fb5bffc8646e388a649f5bdc6b463"},
+    {file = "polars_runtime_32-1.44.1-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:0580807dc3eed258f0db70bb65d905dd43f0135392119ec25308033ae24258fb"},
+    {file = "polars_runtime_32-1.44.1-cp310-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:0627f9aa82cb869725235e5188f698862fd9ada0c8c1cf65c3dc5a49a4a0ec26"},
+    {file = "polars_runtime_32-1.44.1-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:eea4283be8e60822d890dbda20588fe59b4172b508bd5ebf3471e531ca9f50d7"},
+    {file = "polars_runtime_32-1.44.1-cp310-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:04e2c0f46e7a9906fffb1897f18f23b079b74f83c56b50060bace9e7b9b49b1a"},
+    {file = "polars_runtime_32-1.44.1-cp310-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:0956f0cae632d8fad3a04b4315bf2bb69b56d10c83c79a75c2c4c5a13b9ce5cc"},
+    {file = "polars_runtime_32-1.44.1-cp310-abi3-win_amd64.whl", hash = "sha256:159334184e6fbb074c9f4692221ea19970a5e2bed2a479f9d7bdb00b7f3eedb9"},
+    {file = "polars_runtime_32-1.44.1-cp310-abi3-win_arm64.whl", hash = "sha256:3ba28d638d0513e0b4afbcdab5c0059a85021e5f81d62b5f793e7e23badb2cf7"},
+    {file = "polars_runtime_32-1.44.1.tar.gz", hash = "sha256:abd10a54ed1caff42228610fcba0f93251f9870bd7cffb0c78bc26f5e0718ce4"},
+]
 
 [[package]]
 name = "propcache"
@@ -5251,4 +5274,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<3.15"
-content-hash = "50a6a1eb9eba60ddacdf7baa1c11a3c32dbda3e08b301e86d19936378107a705"
+content-hash = "d2e19404262c36adfa549b3e1804a34e27508d8af647e176b3898c83f8110099"
